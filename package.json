@@ -27,5 +27,8 @@
     "commander": "^14.0.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "yaml": "^2.8.2"
   }
 }
