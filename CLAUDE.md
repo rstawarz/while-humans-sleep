@@ -6,6 +6,8 @@ Guidelines for Claude Code and AI agents working on this project.
 
 While Humans Sleep (WHS) is a multi-project AI agent dispatcher using the Claude Agent SDK and Beads for task management. It orchestrates agents across multiple codebases, managing worktrees, handoffs, and workflow state.
 
+**Read the full architecture document:** @docs/ARCHITECTURE.md
+
 ## Tech Stack
 
 - **Language:** TypeScript (strict mode)
