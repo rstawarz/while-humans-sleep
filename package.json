@@ -1,0 +1,31 @@
+{
+  "name": "while-humans-sleep",
+  "version": "0.1.0",
+  "description": "Multi-project AI agent dispatcher using Claude Agent SDK and Beads",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "whs": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "lint": "eslint src/",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "commander": "^14.0.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
