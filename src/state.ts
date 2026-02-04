@@ -5,12 +5,13 @@
  * State is saved after every significant change to enable crash recovery.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { ensureConfigDir, getConfigDir } from "./config.js";
 import type { ActiveWork, PendingQuestion, AnsweredQuestion } from "./types.js";
 
 const STATE_FILE = "state.json";
+const LOCK_FILE = "dispatcher.lock";
 
 /**
  * Serializable version of ActiveWork (dates as ISO strings)
@@ -471,4 +472,101 @@ export function getStateSummary(state: DispatcherState): {
     activeProjects: [...activeProjects],
     oldestWork,
   };
+}
+
+// ============================================================
+// Lock File Management
+// ============================================================
+
+/**
+ * Gets the path to the lock file
+ */
+export function getLockPath(): string {
+  return join(getConfigDir(), LOCK_FILE);
+}
+
+/**
+ * Lock file content structure
+ */
+interface LockInfo {
+  pid: number;
+  startedAt: string;
+}
+
+/**
+ * Attempts to acquire the dispatcher lock.
+ * Returns true if lock acquired, false if another dispatcher is running.
+ */
+export function acquireLock(): boolean {
+  ensureConfigDir();
+  const lockPath = getLockPath();
+
+  // Check if lock exists
+  if (existsSync(lockPath)) {
+    try {
+      const content = readFileSync(lockPath, "utf-8");
+      const lockInfo: LockInfo = JSON.parse(content);
+
+      // Check if the process is still running
+      try {
+        process.kill(lockInfo.pid, 0); // Signal 0 = check if process exists
+        // Process exists, lock is held
+        return false;
+      } catch {
+        // Process doesn't exist, stale lock - remove it
+        unlinkSync(lockPath);
+      }
+    } catch {
+      // Invalid lock file, remove it
+      unlinkSync(lockPath);
+    }
+  }
+
+  // Create lock file
+  const lockInfo: LockInfo = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  };
+  writeFileSync(lockPath, JSON.stringify(lockInfo, null, 2));
+  return true;
+}
+
+/**
+ * Releases the dispatcher lock
+ */
+export function releaseLock(): void {
+  const lockPath = getLockPath();
+  if (existsSync(lockPath)) {
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // Ignore errors on cleanup
+    }
+  }
+}
+
+/**
+ * Gets info about the current lock holder (if any)
+ */
+export function getLockInfo(): LockInfo | null {
+  const lockPath = getLockPath();
+  if (!existsSync(lockPath)) {
+    return null;
+  }
+
+  try {
+    const content = readFileSync(lockPath, "utf-8");
+    const lockInfo: LockInfo = JSON.parse(content);
+
+    // Verify process is still running
+    try {
+      process.kill(lockInfo.pid, 0);
+      return lockInfo;
+    } catch {
+      // Process doesn't exist, stale lock
+      return null;
+    }
+  } catch {
+    return null;
+  }
 }
