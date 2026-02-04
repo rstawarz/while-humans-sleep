@@ -18,6 +18,8 @@ vi.mock("./beads/index.js", () => ({
     comment: vi.fn(),
     show: vi.fn(),
     list: vi.fn(),
+    isDaemonRunning: vi.fn(() => true),
+    ensureDaemonWithSyncBranch: vi.fn(),
   },
 }));
 
@@ -73,6 +75,9 @@ vi.mock("./state.js", () => {
     }),
     getAnsweredQuestions: vi.fn(() => []),
     setPaused: vi.fn((state, paused) => ({ ...state, paused })),
+    acquireLock: vi.fn(() => true),
+    releaseLock: vi.fn(),
+    getLockInfo: vi.fn(() => null),
   };
 });
 
@@ -198,6 +203,8 @@ describe("Dispatcher E2E", () => {
       });
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      // Set running flag so tick() will process work
+      (dispatcher as any).running = true;
 
       // Run one tick (don't start the loop)
       await (dispatcher as any).tick();
@@ -263,6 +270,7 @@ describe("Dispatcher E2E", () => {
       });
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -309,6 +317,7 @@ describe("Dispatcher E2E", () => {
       });
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -364,6 +373,7 @@ describe("Dispatcher E2E", () => {
       });
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -415,6 +425,7 @@ describe("Dispatcher E2E", () => {
       });
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -450,6 +461,7 @@ describe("Dispatcher E2E", () => {
       mockAgentRunner.runAgent.mockRejectedValue(new Error("Rate limit exceeded (429)"));
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -473,6 +485,7 @@ describe("Dispatcher E2E", () => {
       mockAgentRunner.runAgent.mockRejectedValue(new Error("Something went wrong"));
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -510,6 +523,7 @@ describe("Dispatcher E2E", () => {
       mockHandoff.isValidAgent.mockReturnValue(false);
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
       await (dispatcher as any).tick();
       await flushPromises();
 
@@ -679,5 +693,233 @@ describe("Agent role mapping", () => {
     expect(getAgentRole("architect")).toContain("software architect");
     expect(getAgentRole("planner")).toContain("technical planner");
     expect(getAgentRole("unknown_agent")).toContain("unknown_agent agent");
+  });
+});
+
+// ============================================================
+// Graceful Shutdown Tests
+// ============================================================
+
+describe("Graceful shutdown", () => {
+  let mockNotifier: Notifier;
+  let mockState: any;
+
+  const testConfig: Config = {
+    projects: [],
+    orchestratorPath: "/test",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("isAcceptingWork returns true when running and not shutting down", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    // Set running state manually (normally set by start())
+    (dispatcher as any).running = true;
+    (dispatcher as any).shuttingDown = false;
+
+    expect(dispatcher.isAcceptingWork()).toBe(true);
+  });
+
+  it("isAcceptingWork returns false when shutting down", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = true;
+    (dispatcher as any).shuttingDown = true;
+
+    expect(dispatcher.isAcceptingWork()).toBe(false);
+  });
+
+  it("isAcceptingWork returns false when not running", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = false;
+    (dispatcher as any).shuttingDown = false;
+
+    expect(dispatcher.isAcceptingWork()).toBe(false);
+  });
+
+  it("getRunningAgentCount returns correct count", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    expect(dispatcher.getRunningAgentCount()).toBe(0);
+
+    // Simulate adding running agents
+    const runningAgents = (dispatcher as any).runningAgents;
+    runningAgents.set("agent-1", Promise.resolve());
+    runningAgents.set("agent-2", Promise.resolve());
+
+    expect(dispatcher.getRunningAgentCount()).toBe(2);
+  });
+
+  it("requestShutdown stops immediately when no agents running", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = true;
+    (dispatcher as any).shuttingDown = false;
+
+    await dispatcher.requestShutdown();
+
+    expect((dispatcher as any).running).toBe(false);
+    expect(mockState.saveState).toHaveBeenCalled();
+    expect(mockState.releaseLock).toHaveBeenCalled();
+  });
+
+  it("requestShutdown waits for running agents", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = true;
+
+    // Create a promise that we can resolve manually
+    let resolveAgent!: () => void;
+    const agentPromise = new Promise<void>((resolve) => {
+      resolveAgent = resolve;
+    });
+
+    // Add running agent
+    (dispatcher as any).runningAgents.set("agent-1", agentPromise);
+
+    // Start shutdown (don't await yet)
+    const shutdownPromise = dispatcher.requestShutdown();
+
+    // Verify still shutting down (shuttingDown flag set)
+    expect((dispatcher as any).shuttingDown).toBe(true);
+    expect((dispatcher as any).running).toBe(true);
+
+    // Complete the agent
+    resolveAgent();
+    await shutdownPromise;
+
+    // Now should be stopped
+    expect((dispatcher as any).running).toBe(false);
+  });
+
+  it("double requestShutdown forces immediate stop", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = true;
+
+    // Create a never-resolving promise (simulates long-running agent)
+    const neverResolves = new Promise<void>(() => {});
+    (dispatcher as any).runningAgents.set("agent-1", neverResolves);
+
+    // First shutdown starts graceful wait
+    const shutdownPromise = dispatcher.requestShutdown();
+
+    expect((dispatcher as any).shuttingDown).toBe(true);
+    expect((dispatcher as any).running).toBe(true);
+
+    // Second shutdown forces stop
+    await dispatcher.requestShutdown();
+
+    expect((dispatcher as any).running).toBe(false);
+  });
+
+  it("tick does not start new work when shutting down", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const mockWorkflow = await import("./workflow.js");
+    const mockBeads = (await import("./beads/index.js")).beads as any;
+
+    mockBeads.ready.mockReturnValue([{
+      id: "bd-123",
+      title: "Test task",
+      status: "open",
+      priority: 1,
+    }]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    (dispatcher as any).running = true;
+    (dispatcher as any).shuttingDown = true;
+
+    await (dispatcher as any).tick();
+
+    // Should not start new workflows when shutting down
+    expect(mockWorkflow.startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("stop() calls requestShutdown", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    const requestShutdownSpy = vi.spyOn(dispatcher, "requestShutdown");
+
+    await dispatcher.stop();
+
+    expect(requestShutdownSpy).toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Lock File Tests for Dispatcher
+// ============================================================
+
+describe("Dispatcher lock file", () => {
+  let mockNotifier: Notifier;
+  let mockState: any;
+
+  const testConfig: Config = {
+    projects: [],
+    orchestratorPath: "/test",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("start throws if another dispatcher is running", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    // Simulate existing lock
+    mockState.getLockInfo.mockReturnValue({
+      pid: 12345,
+      startedAt: new Date().toISOString(),
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    await expect(dispatcher.start()).rejects.toThrow("Dispatcher already running");
+  });
+
+  it("start throws if lock acquisition fails", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockState.getLockInfo.mockReturnValue(null);
+    mockState.acquireLock.mockReturnValue(false);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    await expect(dispatcher.start()).rejects.toThrow("Failed to acquire lock");
   });
 });

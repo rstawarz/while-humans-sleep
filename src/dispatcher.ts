@@ -57,12 +57,17 @@ export class Dispatcher {
   private state: DispatcherState;
   private notifier: Notifier;
   private running: boolean = false;
+  private shuttingDown: boolean = false;
   private tickCount: number = 0;
+  private runningAgents: Map<string, Promise<void>> = new Map();
+  private shutdownResolve: (() => void) | null = null;
 
   private readonly config: Config;
 
   // Check daemon health every 60 ticks (5 min at 5s intervals)
   private readonly DAEMON_HEALTH_CHECK_INTERVAL = 60;
+  // Graceful shutdown timeout (wait for agents)
+  private readonly GRACEFUL_SHUTDOWN_TIMEOUT_MS = 300000; // 5 minutes
 
   constructor(config: Config, notifier: Notifier) {
     this.config = config;
@@ -125,11 +130,85 @@ export class Dispatcher {
     }
   }
 
-  async stop(): Promise<void> {
+  /**
+   * Request graceful shutdown - waits for running agents to complete
+   */
+  async requestShutdown(): Promise<void> {
+    if (this.shuttingDown) {
+      // Already shutting down, force stop
+      console.log("\n⚠️  Force stopping (agents may lose work)...");
+      this.forceStop();
+      return;
+    }
+
+    this.shuttingDown = true;
+    const activeCount = this.runningAgents.size;
+
+    if (activeCount === 0) {
+      console.log("\n🛑 No active agents, stopping immediately...");
+      this.forceStop();
+      return;
+    }
+
+    console.log(`\n🛑 Graceful shutdown requested...`);
+    console.log(`   Waiting for ${activeCount} active agent(s) to complete.`);
+    console.log(`   Press Ctrl+C again to force stop.\n`);
+
+    // Wait for all running agents with timeout
+    const agentPromises = [...this.runningAgents.values()];
+    const timeoutPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.log("\n⏰ Graceful shutdown timeout reached.");
+        resolve();
+      }, this.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+    });
+
+    // Create a promise that resolves when shutdown is forced
+    const forcePromise = new Promise<void>((resolve) => {
+      this.shutdownResolve = resolve;
+    });
+
+    await Promise.race([
+      Promise.all(agentPromises),
+      timeoutPromise,
+      forcePromise,
+    ]);
+
+    this.forceStop();
+  }
+
+  /**
+   * Force stop - immediate shutdown without waiting
+   */
+  private forceStop(): void {
     console.log("🛑 Stopping dispatcher...");
     this.running = false;
     saveState(this.state);
     releaseLock();
+    if (this.shutdownResolve) {
+      this.shutdownResolve();
+    }
+  }
+
+  /**
+   * Check if dispatcher is accepting new work
+   */
+  isAcceptingWork(): boolean {
+    return this.running && !this.shuttingDown;
+  }
+
+  /**
+   * Get count of running agents
+   */
+  getRunningAgentCount(): number {
+    return this.runningAgents.size;
+  }
+
+  /**
+   * Legacy stop method - now calls requestShutdown
+   */
+  async stop(): Promise<void> {
+    await this.requestShutdown();
   }
 
   pause(): void {
@@ -182,16 +261,26 @@ export class Dispatcher {
     // 1. Process any answered questions
     await this.processAnsweredQuestions();
 
+    // Don't start new work if shutting down
+    if (!this.isAcceptingWork()) {
+      return;
+    }
+
     // 2. Poll orchestrator beads for ready workflow steps
     const workflowSteps = this.getReadyWorkflowSteps();
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
       if (this.state.activeWork.has(step.id)) continue;
 
-      // Dispatch asynchronously
-      this.dispatchWorkflowStep(step).catch((err) => {
-        this.handleDispatchError(step, err);
-      });
+      // Dispatch asynchronously and track the promise
+      const agentPromise = this.dispatchWorkflowStep(step)
+        .catch((err) => {
+          this.handleDispatchError(step, err);
+        })
+        .finally(() => {
+          this.runningAgents.delete(step.id);
+        });
+      this.runningAgents.set(step.id, agentPromise);
     }
 
     // 3. If under capacity, poll project beads for new work
@@ -199,9 +288,14 @@ export class Dispatcher {
       const newWork = await this.pollProjectBacklogs();
       const next = this.pickHighestPriority(newWork);
       if (next) {
-        this.startNewWorkflow(next).catch((err) => {
-          console.error(`Failed to start workflow for ${next.id}:`, err);
-        });
+        const workflowPromise = this.startNewWorkflow(next)
+          .catch((err) => {
+            console.error(`Failed to start workflow for ${next.id}:`, err);
+          })
+          .finally(() => {
+            this.runningAgents.delete(next.id);
+          });
+        this.runningAgents.set(next.id, workflowPromise);
       }
     }
   }
