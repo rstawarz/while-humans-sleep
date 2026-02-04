@@ -302,13 +302,15 @@ program
   });
 
 program
-  .command("add <name> <path>")
-  .description("Add a project to manage")
-  .option("-b, --branch <branch>", "Base branch", "main")
+  .command("add [path]")
+  .description("Add a project to manage (interactive setup)")
+  .option("-y, --yes", "Skip prompts and use defaults")
+  .option("-n, --name <name>", "Project name")
+  .option("-p, --prefix <prefix>", "Bead ID prefix")
+  .option("-b, --branch <branch>", "Base branch")
   .option("-s, --stealth", "Use beads stealth mode (local only)")
-  .option("-p, --prefix <prefix>", "Bead ID prefix (default: project name)")
-  .option("-a, --agents-path <path>", "Path to agent definitions", "docs/llm/agents")
-  .action(async (name, projectPath, options) => {
+  .option("-a, --agents-path <path>", "Path to agent definitions")
+  .action(async (inputPath, options) => {
     // Check if WHS is initialized
     if (!isInitialized()) {
       console.error("Error: WHS is not initialized.");
@@ -316,102 +318,190 @@ program
       process.exit(1);
     }
 
-    const beadsMode = options.stealth ? "stealth" : "committed";
-
-    // Expand and resolve the path
-    const resolvedPath = resolve(expandPath(projectPath));
-
-    console.log(`Adding project: ${name}`);
-    console.log(`  Path: ${resolvedPath}`);
-    console.log(`  Branch: ${options.branch}`);
-    console.log(`  Beads mode: ${beadsMode}`);
-    console.log(`  Agents path: ${options.agentsPath}`);
-    console.log("");
-
-    // 1. Check if project already exists in config
-    if (getProject(name)) {
-      console.error(`Error: Project "${name}" already exists in config.`);
-      console.error(`Use a different name or remove the existing project first.`);
-      process.exit(1);
-    }
-
-    // 2. Validate path exists
-    if (!existsSync(resolvedPath)) {
-      console.error(`Error: Path does not exist: ${resolvedPath}`);
-      process.exit(1);
-    }
-
-    // 3. Validate it's a git repository
-    const gitDir = resolve(resolvedPath, ".git");
-    if (!existsSync(gitDir)) {
-      console.error(`Error: Not a git repository: ${resolvedPath}`);
-      console.error(`Initialize git first: git init`);
-      process.exit(1);
-    }
-
-    // 4. Validate base branch exists
-    try {
-      execSync(`git rev-parse --verify ${options.branch}`, {
-        cwd: resolvedPath,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch {
-      console.error(`Error: Branch "${options.branch}" does not exist in ${resolvedPath}`);
-      console.error(`Create it first or specify a different branch with --branch`);
-      process.exit(1);
-    }
-
-    // 5. Initialize beads if not present
-    const prefix = options.prefix || name;
-    if (!beads.isInitialized(resolvedPath)) {
-      console.log("Initializing beads...");
-      try {
-        beads.init(resolvedPath, { stealth: options.stealth, prefix });
-        console.log(`  Beads initialized (${beadsMode} mode)`);
-        console.log(`  Prefix: ${prefix}`);
-      } catch (err) {
-        console.error(`Error initializing beads: ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      }
-    } else {
-      console.log("  Beads already initialized");
-      // Update prefix if specified and different
-      const currentPrefix = beads.getPrefix(resolvedPath);
-      if (options.prefix && currentPrefix !== options.prefix) {
-        console.log(`  Updating prefix to: ${options.prefix}`);
-        beads.setPrefix(options.prefix, resolvedPath);
-      } else {
-        console.log(`  Prefix: ${currentPrefix || "(default)"}`);
-      }
-    }
-
-    // 6. Configure beads sync-branch and start daemon
-    // This ensures beads commits go to a separate branch, keeping main clean for PR merges
-    console.log("Configuring beads daemon...");
-    try {
-      beads.ensureDaemonWithSyncBranch(resolvedPath, "beads-sync");
-      console.log("  Sync branch: beads-sync");
-      console.log("  Daemon started with auto-commit");
-    } catch (err) {
-      console.warn(`  Warning: Could not start beads daemon: ${err instanceof Error ? err.message : String(err)}`);
-      console.warn("  You may need to start it manually: bd daemon start --auto-commit");
-    }
-
-    // 7. Add project to config
-    const added = addProject(name, resolvedPath, {
-      baseBranch: options.branch,
-      agentsPath: options.agentsPath,
-      beadsMode,
+    const { createInterface } = await import("readline");
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
     });
 
-    if (added) {
-      console.log(`\nProject "${name}" added successfully.`);
-      console.log(`\nNext steps:`);
-      console.log(`  1. Create tasks with: bd create "Task title" (in ${resolvedPath})`);
-      console.log(`  2. Start the dispatcher with: whs start`);
-    } else {
-      console.error(`\nFailed to add project to config.`);
-      process.exit(1);
+    const ask = (question: string): Promise<string> => {
+      return new Promise((resolve) => {
+        rl.question(question, (answer) => {
+          resolve(answer.trim());
+        });
+      });
+    };
+
+    try {
+      // 1. Get path (required)
+      let projectPath = inputPath;
+      if (!projectPath) {
+        projectPath = await ask("Project path: ");
+        if (!projectPath) {
+          console.error("Error: Path is required.");
+          process.exit(1);
+        }
+      }
+
+      const resolvedPath = resolve(expandPath(projectPath));
+
+      // Validate path exists
+      if (!existsSync(resolvedPath)) {
+        console.error(`Error: Path does not exist: ${resolvedPath}`);
+        process.exit(1);
+      }
+
+      // Validate it's a git repository
+      const gitDir = resolve(resolvedPath, ".git");
+      if (!existsSync(gitDir)) {
+        console.error(`Error: Not a git repository: ${resolvedPath}`);
+        console.error(`Initialize git first: git init`);
+        process.exit(1);
+      }
+
+      // Derive default name from folder
+      const { basename } = await import("path");
+      const folderName = basename(resolvedPath);
+
+      console.log(`\n📁 Adding project from: ${resolvedPath}\n`);
+
+      // 2. Get project name
+      let name = options.name;
+      if (!name && !options.yes) {
+        const input = await ask(`Project name [${folderName}]: `);
+        name = input || folderName;
+      } else {
+        name = name || folderName;
+      }
+
+      // Check if project already exists
+      if (getProject(name)) {
+        console.error(`Error: Project "${name}" already exists in config.`);
+        console.error(`Use a different name or remove the existing project first.`);
+        process.exit(1);
+      }
+
+      // 3. Get prefix
+      let prefix = options.prefix;
+      if (!prefix && !options.yes) {
+        const input = await ask(`Bead ID prefix [${name}]: `);
+        prefix = input || name;
+      } else {
+        prefix = prefix || name;
+      }
+
+      // 4. Get base branch
+      let baseBranch = options.branch;
+      if (!baseBranch) {
+        // Try to detect default branch
+        let defaultBranch = "main";
+        try {
+          const result = execSync("git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/heads/main", {
+            cwd: resolvedPath,
+            encoding: "utf-8",
+          }).trim();
+          defaultBranch = result.replace("refs/remotes/origin/", "").replace("refs/heads/", "");
+        } catch {
+          // Fallback to main
+        }
+
+        if (!options.yes) {
+          const input = await ask(`Base branch [${defaultBranch}]: `);
+          baseBranch = input || defaultBranch;
+        } else {
+          baseBranch = defaultBranch;
+        }
+      }
+
+      // Validate branch exists
+      try {
+        execSync(`git rev-parse --verify ${baseBranch}`, {
+          cwd: resolvedPath,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch {
+        console.error(`Error: Branch "${baseBranch}" does not exist in ${resolvedPath}`);
+        process.exit(1);
+      }
+
+      // 5. Get beads mode
+      let beadsMode: "committed" | "stealth" = options.stealth ? "stealth" : "committed";
+      if (!options.stealth && !options.yes) {
+        const input = await ask(`Beads mode (committed/stealth) [committed]: `);
+        if (input.toLowerCase() === "stealth") {
+          beadsMode = "stealth";
+        }
+      }
+
+      // 6. Get agents path
+      const defaultAgentsPath = "docs/llm/agents";
+      let agentsPath = options.agentsPath;
+      if (!agentsPath && !options.yes) {
+        const input = await ask(`Agents path [${defaultAgentsPath}]: `);
+        agentsPath = input || defaultAgentsPath;
+      } else {
+        agentsPath = agentsPath || defaultAgentsPath;
+      }
+
+      rl.close();
+
+      // Summary
+      console.log(`\n📋 Project configuration:`);
+      console.log(`   Name: ${name}`);
+      console.log(`   Path: ${resolvedPath}`);
+      console.log(`   Prefix: ${prefix}`);
+      console.log(`   Branch: ${baseBranch}`);
+      console.log(`   Beads mode: ${beadsMode}`);
+      console.log(`   Agents path: ${agentsPath}`);
+      console.log("");
+
+      // Initialize beads if not present
+      if (!beads.isInitialized(resolvedPath)) {
+        console.log("Initializing beads...");
+        try {
+          beads.init(resolvedPath, { stealth: beadsMode === "stealth", prefix });
+          console.log(`  ✓ Beads initialized`);
+        } catch (err) {
+          console.error(`Error initializing beads: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+      } else {
+        console.log("  ✓ Beads already initialized");
+        // Update prefix if different
+        const currentPrefix = beads.getPrefix(resolvedPath);
+        if (currentPrefix !== prefix) {
+          beads.setPrefix(prefix, resolvedPath);
+          console.log(`  ✓ Updated prefix to: ${prefix}`);
+        }
+      }
+
+      // Configure beads sync-branch and start daemon
+      console.log("Configuring beads daemon...");
+      try {
+        beads.ensureDaemonWithSyncBranch(resolvedPath, "beads-sync");
+        console.log("  ✓ Daemon running with sync-branch");
+      } catch (err) {
+        console.warn(`  ⚠ Could not start daemon: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Add project to config
+      const added = addProject(name, resolvedPath, {
+        baseBranch,
+        agentsPath,
+        beadsMode,
+      });
+
+      if (added) {
+        console.log(`\n✅ Project "${name}" added successfully!\n`);
+        console.log(`Next steps:`);
+        console.log(`  1. Create tasks: cd ${resolvedPath} && bd create "Task title"`);
+        console.log(`  2. Start dispatcher: whs start`);
+      } else {
+        console.error(`\nFailed to add project to config.`);
+        process.exit(1);
+      }
+    } finally {
+      rl.close();
     }
   });
 
