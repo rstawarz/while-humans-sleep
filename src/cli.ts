@@ -527,29 +527,111 @@ program
   });
 
 program
-  .command("plan <project> <description>")
-  .description("Start planning a new feature")
-  .option("-p, --priority <level>", "Priority level (0-4, where 0 is critical)", "2")
-  .action(async (projectName, description, options) => {
-    // 1. Validate project exists
-    const project = getProject(projectName);
-    if (!project) {
-      console.error(`Error: Project "${projectName}" not found in config.`);
-      console.error(`Use "whs list" to see configured projects.`);
-      process.exit(1);
-    }
+  .command("plan [description]")
+  .description("Start planning a new feature (interactive)")
+  .option("-P, --project <name>", "Project name (default: infer from cwd)")
+  .option("-p, --priority <level>", "Priority level (0-4, where 0 is critical)")
+  .action(async (inputDescription, options) => {
+    const { createInterface } = await import("readline");
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
 
-    const projectPath = expandPath(project.repoPath);
-    const priority = parseInt(options.priority, 10);
-
-    console.log(`Planning new feature for ${projectName}`);
-    console.log(`  Description: ${description}`);
-    console.log(`  Priority: ${priority}`);
-    console.log("");
+    const ask = (question: string): Promise<string> => {
+      return new Promise((resolve) => {
+        rl.question(question, (answer) => {
+          resolve(answer.trim());
+        });
+      });
+    };
 
     try {
-      // 2. Create epic in project beads (blocked status)
-      // The epic represents the feature to be built
+      // 1. Determine project (from flag, cwd, or prompt)
+      let projectName = options.project;
+      let project = projectName ? getProject(projectName) : null;
+
+      if (!project) {
+        // Try to infer from current directory
+        const cwd = process.cwd();
+        const config = loadConfig();
+
+        for (const p of config.projects) {
+          const projectPath = expandPath(p.repoPath);
+          if (cwd === projectPath || cwd.startsWith(projectPath + "/")) {
+            project = p;
+            projectName = p.name;
+            break;
+          }
+        }
+      }
+
+      if (!project) {
+        // List available projects and ask
+        const projects = listProjects();
+        if (projects.length === 0) {
+          console.error("Error: No projects configured.");
+          console.error("Run `whs add <path>` to add a project first.");
+          process.exit(1);
+        }
+
+        console.log("\nAvailable projects:");
+        projects.forEach((name, i) => console.log(`  ${i + 1}. ${name}`));
+        console.log("");
+
+        const input = await ask("Project name or number: ");
+        const num = parseInt(input, 10);
+        if (num >= 1 && num <= projects.length) {
+          projectName = projects[num - 1];
+        } else {
+          projectName = input;
+        }
+
+        project = getProject(projectName);
+        if (!project) {
+          console.error(`Error: Project "${projectName}" not found.`);
+          process.exit(1);
+        }
+      }
+
+      console.log(`\n📋 Planning for project: ${projectName}\n`);
+
+      // 2. Get description
+      let description = inputDescription;
+      if (!description) {
+        description = await ask("What do you want to build? ");
+        if (!description) {
+          console.error("Error: Description is required.");
+          process.exit(1);
+        }
+      }
+
+      // 3. Get priority
+      let priority = 2;
+      if (options.priority !== undefined) {
+        priority = parseInt(options.priority, 10);
+      } else {
+        const input = await ask("Priority (0=critical, 1=high, 2=normal, 3=low, 4=backlog) [2]: ");
+        if (input) {
+          priority = parseInt(input, 10);
+          if (isNaN(priority) || priority < 0 || priority > 4) {
+            console.error("Error: Priority must be 0-4.");
+            process.exit(1);
+          }
+        }
+      }
+
+      rl.close();
+
+      const projectPath = expandPath(project.repoPath);
+
+      console.log(`\n📋 Creating planning workflow:`);
+      console.log(`   Project: ${projectName}`);
+      console.log(`   Feature: ${description}`);
+      console.log(`   Priority: ${priority}`);
+      console.log("");
+
+      // Create epic in project beads (blocked status)
       const epic = beads.create(description, projectPath, {
         type: "epic",
         status: "blocked",
@@ -562,8 +644,7 @@ program
       console.log(`  Title: ${epic.title}`);
       console.log(`  Status: ${epic.status}`);
 
-      // 3. Create planning task under the epic (open status)
-      // This task will be picked up by the dispatcher and run the planner agent
+      // Create planning task under the epic (open status)
       const planningTask = beads.create(`Plan: ${description}`, projectPath, {
         type: "planning",
         status: "open",
@@ -578,19 +659,20 @@ program
       console.log(`  Parent: ${epic.id}`);
       console.log(`  Status: ${planningTask.status}`);
 
-      // 4. Add dependency: epic is blocked by planning task
+      // Add dependency: epic is blocked by planning task
       beads.depAdd(epic.id, planningTask.id, projectPath);
       console.log(`\nDependency added: ${epic.id} blocked by ${planningTask.id}`);
 
-      console.log(`\nPlanning workflow created successfully.`);
-      console.log(`\nNext steps:`);
+      console.log(`\n✅ Planning workflow created!\n`);
+      console.log(`Next steps:`);
       console.log(`  1. Start the dispatcher: whs start`);
       console.log(`  2. The planner agent will analyze and ask questions`);
       console.log(`  3. Answer questions with: whs answer <id> "<answer>"`);
       console.log(`  4. Approve the plan when prompted`);
-      console.log(`\nTrack progress: bd show ${epic.id} (in ${projectPath})`);
+      console.log(`\nTrack progress: bd show ${epic.id}`);
     } catch (err) {
-      console.error(`Error creating planning workflow: ${err instanceof Error ? err.message : String(err)}`);
+      rl.close();
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   });
