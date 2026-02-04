@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import type { ActiveWork, PendingQuestion, WorkItem, AnsweredQuestion } from "./types.js";
+import type { ActiveWork, WorkItem } from "./types.js";
 
 // Note: These tests use the real state module which writes to ~/.whs/
 // We test serialization logic separately to avoid file system side effects
@@ -32,29 +32,6 @@ describe("state serialization", () => {
     costSoFar: 0.05,
   };
 
-  const testQuestion: PendingQuestion = {
-    id: "q-001",
-    workItemId: "bd-test-1",
-    project: "test-project",
-    workflowEpicId: "bd-w001",
-    workflowStepId: "bd-w001.1",
-    sessionId: "session-123",
-    worktreePath: "/tmp/test-worktree",
-    questions: [
-      {
-        question: "Which auth method?",
-        header: "Auth",
-        options: [
-          { label: "JWT", description: "JSON Web Tokens" },
-          { label: "OAuth", description: "OAuth 2.0" },
-        ],
-        multiSelect: false,
-      },
-    ],
-    askedAt: new Date("2024-01-15T10:30:00Z"),
-    context: "Need to decide on auth approach",
-  };
-
   it("serializes and deserializes ActiveWork correctly", () => {
     // Simulate serialization (what saveState does)
     const serialized = {
@@ -74,30 +51,10 @@ describe("state serialization", () => {
     expect(deserialized.costSoFar).toBe(testActiveWork.costSoFar);
   });
 
-  it("serializes and deserializes PendingQuestion correctly", () => {
-    // Simulate serialization
-    const serialized = {
-      ...testQuestion,
-      askedAt: testQuestion.askedAt.toISOString(),
-    };
-
-    // Simulate deserialization
-    const deserialized: PendingQuestion = {
-      ...serialized,
-      askedAt: new Date(serialized.askedAt),
-    };
-
-    expect(deserialized.id).toBe(testQuestion.id);
-    expect(deserialized.questions).toHaveLength(1);
-    expect(deserialized.questions[0].question).toBe("Which auth method?");
-    expect(deserialized.askedAt.getTime()).toBe(testQuestion.askedAt.getTime());
-  });
-
   it("handles empty state", () => {
     const emptyState = {
-      version: 1,
+      version: 2,
       activeWork: {},
-      pendingQuestions: {},
       paused: false,
       lastUpdated: new Date().toISOString(),
     };
@@ -106,7 +63,6 @@ describe("state serialization", () => {
     const parsed = JSON.parse(json);
 
     expect(Object.keys(parsed.activeWork)).toHaveLength(0);
-    expect(Object.keys(parsed.pendingQuestions)).toHaveLength(0);
     expect(parsed.paused).toBe(false);
   });
 
@@ -138,7 +94,7 @@ describe("state serialization", () => {
 describe("state file format", () => {
   it("produces valid JSON structure", () => {
     const state = {
-      version: 1,
+      version: 2,
       activeWork: {
         "bd-test-1": {
           workItem: {
@@ -160,7 +116,6 @@ describe("state file format", () => {
           costSoFar: 0.05,
         },
       },
-      pendingQuestions: {},
       paused: false,
       lastUpdated: "2024-01-15T10:00:00.000Z",
     };
@@ -168,7 +123,7 @@ describe("state file format", () => {
     const json = JSON.stringify(state, null, 2);
     const parsed = JSON.parse(json);
 
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.activeWork["bd-test-1"]).toBeDefined();
     expect(parsed.activeWork["bd-test-1"].agent).toBe("implementation");
   });
@@ -203,10 +158,6 @@ describe("getStateSummary", () => {
           } as ActiveWork,
         ],
       ]),
-      pendingQuestions: new Map([
-        ["q-1", {} as PendingQuestion],
-      ]),
-      answeredQuestions: new Map(),
       paused: true,
       lastUpdated: new Date(),
     };
@@ -214,7 +165,6 @@ describe("getStateSummary", () => {
     const summary = getStateSummary(state);
 
     expect(summary.activeWorkCount).toBe(3);
-    expect(summary.pendingQuestionsCount).toBe(1);
     expect(summary.paused).toBe(true);
     expect(summary.activeProjects).toContain("project-a");
     expect(summary.activeProjects).toContain("project-b");
@@ -227,8 +177,6 @@ describe("getStateSummary", () => {
 
     const state = {
       activeWork: new Map(),
-      pendingQuestions: new Map(),
-      answeredQuestions: new Map(),
       paused: false,
       lastUpdated: new Date(),
     };
@@ -236,7 +184,6 @@ describe("getStateSummary", () => {
     const summary = getStateSummary(state);
 
     expect(summary.activeWorkCount).toBe(0);
-    expect(summary.pendingQuestionsCount).toBe(0);
     expect(summary.paused).toBe(false);
     expect(summary.activeProjects).toHaveLength(0);
     expect(summary.oldestWork).toBeNull();
@@ -293,8 +240,6 @@ describe.skip("state persistence integration", () => {
 describe("state mutation functions", () => {
   const createTestState = () => ({
     activeWork: new Map<string, ActiveWork>(),
-    pendingQuestions: new Map<string, PendingQuestion>(),
-    answeredQuestions: new Map(),
     paused: false,
     lastUpdated: new Date(),
   });
@@ -320,29 +265,6 @@ describe("state mutation functions", () => {
     startedAt: new Date("2024-01-15T10:00:00Z"),
     agent: "implementation",
     costSoFar: 0.05,
-  };
-
-  const testQuestion: PendingQuestion = {
-    id: "q-001",
-    workItemId: "bd-test-1",
-    project: "test-project",
-    workflowEpicId: "bd-w001",
-    workflowStepId: "bd-w001.1",
-    sessionId: "session-123",
-    worktreePath: "/tmp/test-worktree",
-    questions: [
-      {
-        question: "Which auth method?",
-        header: "Auth",
-        options: [
-          { label: "JWT", description: "JSON Web Tokens" },
-          { label: "OAuth", description: "OAuth 2.0" },
-        ],
-        multiSelect: false,
-      },
-    ],
-    askedAt: new Date("2024-01-15T10:30:00Z"),
-    context: "Need to decide on auth approach",
   };
 
   describe("activeWork operations", () => {
@@ -408,117 +330,6 @@ describe("state mutation functions", () => {
     });
   });
 
-  describe("pendingQuestions operations", () => {
-    it("addPendingQuestion adds question to state", () => {
-      const state = createTestState();
-
-      // Simulate addPendingQuestion
-      const newState = {
-        ...state,
-        pendingQuestions: new Map(state.pendingQuestions),
-        lastUpdated: new Date(),
-      };
-      newState.pendingQuestions.set(testQuestion.id, testQuestion);
-
-      expect(newState.pendingQuestions.size).toBe(1);
-      expect(newState.pendingQuestions.get("q-001")?.questions[0].question).toBe("Which auth method?");
-    });
-
-    it("removePendingQuestion removes question from state", () => {
-      const state = createTestState();
-      state.pendingQuestions.set("q-001", testQuestion);
-      state.pendingQuestions.set("q-002", { ...testQuestion, id: "q-002" });
-
-      // Simulate removePendingQuestion
-      const newState = {
-        ...state,
-        pendingQuestions: new Map(state.pendingQuestions),
-        lastUpdated: new Date(),
-      };
-      newState.pendingQuestions.delete("q-001");
-
-      expect(newState.pendingQuestions.size).toBe(1);
-      expect(newState.pendingQuestions.has("q-001")).toBe(false);
-      expect(newState.pendingQuestions.has("q-002")).toBe(true);
-    });
-
-    it("getPendingQuestion returns question by ID", () => {
-      const state = createTestState();
-      state.pendingQuestions.set("q-001", testQuestion);
-
-      // Simulate getPendingQuestion
-      const found = state.pendingQuestions.get("q-001");
-      const notFound = state.pendingQuestions.get("q-999");
-
-      expect(found?.id).toBe("q-001");
-      expect(found?.context).toBe("Need to decide on auth approach");
-      expect(notFound).toBeUndefined();
-    });
-  });
-
-  describe("answeredQuestions operations", () => {
-    it("answerQuestion moves question from pending to answered", () => {
-      const state = createTestState();
-      state.pendingQuestions.set("q-001", testQuestion);
-
-      // Simulate answerQuestion
-      const question = state.pendingQuestions.get("q-001");
-      const answeredQuestion = {
-        ...question!,
-        answer: "Use JWT",
-        answeredAt: new Date(),
-      };
-
-      const newState = {
-        ...state,
-        pendingQuestions: new Map(state.pendingQuestions),
-        answeredQuestions: new Map(state.answeredQuestions),
-        lastUpdated: new Date(),
-      };
-      newState.pendingQuestions.delete("q-001");
-      newState.answeredQuestions.set("q-001", answeredQuestion);
-
-      expect(newState.pendingQuestions.size).toBe(0);
-      expect(newState.answeredQuestions.size).toBe(1);
-      expect(newState.answeredQuestions.get("q-001")?.answer).toBe("Use JWT");
-    });
-
-    it("answerQuestion throws if question not found", async () => {
-      const { answerQuestion } = await import("./state.js");
-      const state = createTestState();
-
-      expect(() => answerQuestion(state, "nonexistent", "answer")).toThrow("Question not found");
-    });
-
-    it("getAnsweredQuestions returns all answered questions", () => {
-      const state = createTestState();
-      state.answeredQuestions.set("q-001", { ...testQuestion, answer: "A", answeredAt: new Date() });
-      state.answeredQuestions.set("q-002", { ...testQuestion, id: "q-002", answer: "B", answeredAt: new Date() });
-
-      // Simulate getAnsweredQuestions
-      const answered = [...state.answeredQuestions.values()];
-
-      expect(answered).toHaveLength(2);
-      expect(answered[0].answer).toBe("A");
-      expect(answered[1].answer).toBe("B");
-    });
-
-    it("removeAnsweredQuestion removes from answered", () => {
-      const state = createTestState();
-      state.answeredQuestions.set("q-001", { ...testQuestion, answer: "A", answeredAt: new Date() });
-
-      // Simulate removeAnsweredQuestion
-      const newState = {
-        ...state,
-        answeredQuestions: new Map(state.answeredQuestions),
-        lastUpdated: new Date(),
-      };
-      newState.answeredQuestions.delete("q-001");
-
-      expect(newState.answeredQuestions.size).toBe(0);
-    });
-  });
-
   describe("paused state operations", () => {
     it("setPaused updates paused state", () => {
       const state = createTestState();
@@ -553,20 +364,16 @@ describe("state mutation functions", () => {
     it("clearState returns empty state", () => {
       const state = createTestState();
       state.activeWork.set("bd-test-1", testActiveWork);
-      state.pendingQuestions.set("q-001", testQuestion);
       state.paused = true;
 
       // Simulate clearState
       const clearedState = {
         activeWork: new Map(),
-        pendingQuestions: new Map(),
-        answeredQuestions: new Map(),
         paused: false,
         lastUpdated: new Date(),
       };
 
       expect(clearedState.activeWork.size).toBe(0);
-      expect(clearedState.pendingQuestions.size).toBe(0);
       expect(clearedState.paused).toBe(false);
     });
   });
@@ -578,29 +385,13 @@ describe("state loading edge cases", () => {
     const oldVersionState = {
       version: 0, // Old version
       activeWork: {},
-      pendingQuestions: {},
       paused: false,
       lastUpdated: new Date().toISOString(),
     };
 
-    // When version doesn't match CURRENT_VERSION, should return empty state
-    const shouldReturnEmpty = oldVersionState.version !== 1;
+    // When version doesn't match CURRENT_VERSION (2), should return empty state
+    const shouldReturnEmpty = oldVersionState.version !== 2;
     expect(shouldReturnEmpty).toBe(true);
-  });
-
-  it("handles missing answeredQuestions field in old state", () => {
-    const oldState = {
-      version: 1,
-      activeWork: {},
-      pendingQuestions: {},
-      // answeredQuestions missing (old format)
-      paused: false,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    // Should default to empty object
-    const answeredQuestions = (oldState as Record<string, unknown>).answeredQuestions || {};
-    expect(Object.keys(answeredQuestions)).toHaveLength(0);
   });
 
   it("handles corrupt JSON gracefully", () => {
@@ -611,8 +402,6 @@ describe("state loading edge cases", () => {
       // Should return empty state on parse error
       const emptyState = {
         activeWork: new Map(),
-        pendingQuestions: new Map(),
-        answeredQuestions: new Map(),
         paused: false,
         lastUpdated: new Date(),
       };
@@ -628,67 +417,6 @@ describe("state module direct tests", () => {
     const path = getStatePath();
     expect(path).toContain("state.json");
     expect(path).toContain(".whs");
-  });
-
-  it("getPendingQuestion returns question by ID", async () => {
-    const testQuestion: PendingQuestion = {
-      id: "q-001",
-      workItemId: "bd-1",
-      project: "test",
-      workflowEpicId: "bd-w001",
-      workflowStepId: "bd-w001.1",
-      sessionId: "session-1",
-      worktreePath: "/tmp/test",
-      questions: [{ question: "Q?", header: "Test", options: [{ label: "A", description: "" }], multiSelect: false }],
-      askedAt: new Date(),
-      context: "Context",
-    };
-
-    const state = {
-      activeWork: new Map<string, ActiveWork>(),
-      pendingQuestions: new Map<string, PendingQuestion>([["q-001", testQuestion]]),
-      answeredQuestions: new Map(),
-      paused: false,
-      lastUpdated: new Date(),
-    };
-
-    const { getPendingQuestion } = await import("./state.js");
-    const found = getPendingQuestion(state, "q-001");
-    const notFound = getPendingQuestion(state, "q-999");
-
-    expect(found?.id).toBe("q-001");
-    expect(notFound).toBeUndefined();
-  });
-
-  it("getAnsweredQuestions returns all answered questions", async () => {
-    const testQuestion: PendingQuestion = {
-      id: "q-001",
-      workItemId: "bd-1",
-      project: "test",
-      workflowEpicId: "bd-w001",
-      workflowStepId: "bd-w001.1",
-      sessionId: "session-1",
-      worktreePath: "/tmp/test",
-      questions: [{ question: "Q?", header: "Test", options: [{ label: "A", description: "" }], multiSelect: false }],
-      askedAt: new Date(),
-      context: "Context",
-    };
-
-    const answered1: AnsweredQuestion = { ...testQuestion, id: "q-001", answer: "A", answeredAt: new Date() };
-    const answered2: AnsweredQuestion = { ...testQuestion, id: "q-002", answer: "B", answeredAt: new Date() };
-
-    const state = {
-      activeWork: new Map<string, ActiveWork>(),
-      pendingQuestions: new Map<string, PendingQuestion>(),
-      answeredQuestions: new Map([["q-001", answered1], ["q-002", answered2]]),
-      paused: false,
-      lastUpdated: new Date(),
-    };
-
-    const { getAnsweredQuestions } = await import("./state.js");
-    const answered = getAnsweredQuestions(state);
-
-    expect(answered).toHaveLength(2);
   });
 });
 

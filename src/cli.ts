@@ -29,10 +29,11 @@ import {
   loadState,
   getStateSummary,
   getStatePath,
-  answerQuestion as answerQuestionState,
-  getPendingQuestion,
   getLockInfo,
 } from "./state.js";
+import { markStepInProgress } from "./workflow.js";
+import { resumeWithAnswer } from "./agent-runner.js";
+import { getHandoff } from "./handoff.js";
 
 const program = new Command();
 
@@ -682,59 +683,145 @@ program
   .command("answer <questionId> <answer>")
   .description("Answer a pending question")
   .action(async (questionId, answer) => {
-    // Load current state
-    const state = loadState();
+    // Check if WHS is initialized
+    if (!isInitialized()) {
+      console.error("Error: WHS is not initialized.");
+      console.error("Run `whs init` first.");
+      process.exit(1);
+    }
 
-    // Find the pending question
-    const question = getPendingQuestion(state, questionId);
-    if (!question) {
-      // Try to find partial match
-      const allIds = [...state.pendingQuestions.keys()];
-      const matches = allIds.filter((id) => id.includes(questionId));
+    const config = loadConfig();
+    const orchestratorPath = expandPath(config.orchestratorPath);
+
+    // Get pending questions from beads
+    const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+
+    if (pendingQuestions.length === 0) {
+      console.error("No pending questions.");
+      process.exit(1);
+    }
+
+    // Find matching question bead
+    let questionBead = pendingQuestions.find((b) => b.id === questionId);
+
+    if (!questionBead) {
+      // Try partial match
+      const matches = pendingQuestions.filter((b) => b.id.includes(questionId));
 
       if (matches.length === 0) {
         console.error(`Error: Question "${questionId}" not found.`);
-        if (state.pendingQuestions.size === 0) {
-          console.error(`No pending questions.`);
-        } else {
-          console.error(`\nPending questions:`);
-          for (const [id, q] of state.pendingQuestions) {
-            console.error(`  ${id}: ${q.questions[0]?.question || "N/A"}`);
-          }
+        console.error(`\nPending questions:`);
+        for (const bead of pendingQuestions) {
+          const data = beads.parseQuestionData(bead);
+          console.error(`  ${bead.id}: ${data.questions[0]?.question || "N/A"}`);
         }
         process.exit(1);
       } else if (matches.length > 1) {
         console.error(`Error: Multiple questions match "${questionId}":`);
-        for (const id of matches) {
-          console.error(`  ${id}`);
+        for (const bead of matches) {
+          console.error(`  ${bead.id}`);
         }
         console.error(`Please be more specific.`);
         process.exit(1);
       }
-      // Single match found, use it
-      questionId = matches[0];
+
+      questionBead = matches[0];
+      questionId = questionBead.id;
     }
 
-    // Get the question details for display
-    const pendingQuestion = state.pendingQuestions.get(questionId)!;
+    // Parse question data
+    const questionData = beads.parseQuestionData(questionBead);
 
     console.log(`Answering question: ${questionId}`);
-    console.log(`  Project: ${pendingQuestion.project}`);
-    console.log(`  Work item: ${pendingQuestion.workItemId}`);
-    console.log(`  Question: ${pendingQuestion.questions[0]?.question || "N/A"}`);
+    console.log(`  Project: ${questionData.metadata.project}`);
+    console.log(`  Step: ${questionData.metadata.step_id}`);
+    console.log(`  Question: ${questionData.questions[0]?.question || "N/A"}`);
     console.log(`  Answer: ${answer}`);
     console.log("");
 
     try {
-      // Store the answer in state
-      answerQuestionState(state, questionId, answer);
+      // 1. Mark the blocked step as in_progress FIRST (prevents race condition)
+      console.log("Marking step as in_progress...");
+      markStepInProgress(questionData.metadata.step_id);
 
-      console.log(`Answer recorded.`);
-      console.log(`\nThe dispatcher will process this answer on its next tick.`);
-      console.log(`If the dispatcher is not running, start it with: whs start`);
+      // 2. Answer and close the question bead
+      console.log("Closing question bead...");
+      beads.answerQuestion(questionId, answer, orchestratorPath);
+
+      // 3. Resume the agent session with the answer
+      console.log("Resuming agent session...");
+      const result = await resumeWithAnswer(questionData.metadata.session_id, answer, {
+        cwd: questionData.metadata.worktree,
+        maxTurns: 50,
+      });
+
+      // Check for another question
+      if (result.pendingQuestion) {
+        console.log("\n⚠️  Agent has another question. Check `whs questions` for details.");
+        // Note: The dispatcher will create the question bead when it next ticks
+        // For now, we just inform the user
+      } else {
+        // Get handoff and log it
+        const handoff = await getHandoff(
+          result.output,
+          result.sessionId,
+          questionData.metadata.worktree
+        );
+        console.log(`\n✅ Agent resumed successfully.`);
+        console.log(`   Next agent: ${handoff.next_agent}`);
+        if (handoff.context) {
+          console.log(`   Context: ${handoff.context.slice(0, 100)}...`);
+        }
+      }
+
+      console.log(`\nCost for this session: $${result.costUsd.toFixed(4)}`);
     } catch (err) {
-      console.error(`Error recording answer: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`Error processing answer: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
+    }
+  });
+
+program
+  .command("questions")
+  .description("List pending questions")
+  .action(() => {
+    // Check if WHS is initialized
+    if (!isInitialized()) {
+      console.error("Error: WHS is not initialized.");
+      console.error("Run `whs init` first.");
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+    const orchestratorPath = expandPath(config.orchestratorPath);
+
+    const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+
+    if (pendingQuestions.length === 0) {
+      console.log("No pending questions.");
+      return;
+    }
+
+    console.log(`\n❓ Pending Questions (${pendingQuestions.length})\n`);
+
+    for (const bead of pendingQuestions) {
+      const data = beads.parseQuestionData(bead);
+      console.log(`  ${bead.id}`);
+      console.log(`    Project: ${data.metadata.project}`);
+      console.log(`    Step: ${data.metadata.step_id}`);
+      console.log(`    Asked: ${data.metadata.asked_at}`);
+
+      for (const q of data.questions) {
+        console.log(`    Q: ${q.question}`);
+        if (q.options && q.options.length > 0) {
+          for (let i = 0; i < q.options.length; i++) {
+            const opt = q.options[i];
+            console.log(`       ${i + 1}. ${opt.label}${opt.description ? ` - ${opt.description}` : ""}`);
+          }
+        }
+      }
+      console.log(`    Answer with: whs answer ${bead.id} "your answer"`);
+      console.log("");
     }
   });
 
@@ -747,6 +834,15 @@ program
     const state = loadState();
     const summary = getStateSummary(state);
     const lockInfo = getLockInfo();
+    const orchestratorPath = expandPath(config.orchestratorPath);
+
+    // Get pending questions from beads
+    let pendingQuestions: ReturnType<typeof beads.listPendingQuestions> = [];
+    try {
+      pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+    } catch {
+      // Orchestrator may not be initialized
+    }
 
     console.log("📊 Dispatcher Status\n");
 
@@ -771,7 +867,7 @@ program
     }
 
     // Pending questions
-    console.log(`  Pending questions: ${summary.pendingQuestionsCount}`);
+    console.log(`  Pending questions: ${pendingQuestions.length}`);
 
     // Beads daemon status
     console.log(`\n🔮 Beads Daemons\n`);
@@ -787,7 +883,6 @@ program
     }
 
     // Orchestrator daemon
-    const orchestratorPath = expandPath(config.orchestratorPath);
     const orchStatus = beads.daemonStatus(orchestratorPath);
     const orchIcon = orchStatus.running ? "✓" : "✗";
     const orchText = orchStatus.running ? `running (PID ${orchStatus.pid})` : "stopped";
@@ -817,13 +912,14 @@ program
         }
       }
 
-      if (state.pendingQuestions.size > 0) {
+      if (pendingQuestions.length > 0) {
         console.log("\n❓ Pending Questions\n");
-        for (const [id, question] of state.pendingQuestions) {
-          console.log(`  ${id} (${question.project})`);
-          console.log(`    Work item: ${question.workItemId}`);
-          console.log(`    Question: ${question.questions[0]?.question || "N/A"}`);
-          console.log(`    Asked: ${question.askedAt.toISOString()}`);
+        for (const bead of pendingQuestions) {
+          const data = beads.parseQuestionData(bead);
+          console.log(`  ${bead.id} (${data.metadata.project})`);
+          console.log(`    Step: ${data.metadata.step_id}`);
+          console.log(`    Question: ${data.questions[0]?.question || "N/A"}`);
+          console.log(`    Asked: ${data.metadata.asked_at}`);
         }
       }
     }

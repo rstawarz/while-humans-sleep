@@ -20,6 +20,11 @@ vi.mock("./beads/index.js", () => ({
     list: vi.fn(),
     isDaemonRunning: vi.fn(() => true),
     ensureDaemonWithSyncBranch: vi.fn(),
+    // Question bead methods
+    createQuestion: vi.fn(() => ({ id: "q-001" })),
+    listPendingQuestions: vi.fn(() => []),
+    parseQuestionData: vi.fn(),
+    answerQuestion: vi.fn(),
   },
 }));
 
@@ -31,8 +36,6 @@ vi.mock("./config.js", () => ({
 vi.mock("./state.js", () => {
   const createEmptyState = () => ({
     activeWork: new Map(),
-    pendingQuestions: new Map(),
-    answeredQuestions: new Map(),
     paused: false,
     lastUpdated: new Date(),
   });
@@ -58,22 +61,6 @@ vi.mock("./state.js", () => {
       }
       return newState;
     }),
-    addPendingQuestion: vi.fn((state, q) => {
-      const newState = { ...state, pendingQuestions: new Map(state.pendingQuestions) };
-      newState.pendingQuestions.set(q.id, q);
-      return newState;
-    }),
-    removePendingQuestion: vi.fn((state, id) => {
-      const newState = { ...state, pendingQuestions: new Map(state.pendingQuestions) };
-      newState.pendingQuestions.delete(id);
-      return newState;
-    }),
-    removeAnsweredQuestion: vi.fn((state, id) => {
-      const newState = { ...state, answeredQuestions: new Map(state.answeredQuestions) };
-      newState.answeredQuestions.delete(id);
-      return newState;
-    }),
-    getAnsweredQuestions: vi.fn(() => []),
     setPaused: vi.fn((state, paused) => ({ ...state, paused })),
     acquireLock: vi.fn(() => true),
     releaseLock: vi.fn(),
@@ -437,14 +424,17 @@ describe("Dispatcher E2E", () => {
       await (dispatcher as any).tick();
       await flushPromises();
 
-      // Verify question was added to state
-      expect(mockState.addPendingQuestion).toHaveBeenCalledWith(
-        expect.any(Object),
+      // Verify question bead was created
+      expect(mockBeads.createQuestion).toHaveBeenCalledWith(
+        expect.stringContaining("Question:"),
+        expect.any(String), // orchestratorPath
         expect.objectContaining({
           questions: expect.arrayContaining([
             expect.objectContaining({ question: "Which auth provider?" }),
           ]),
-        })
+        }),
+        "bd-w001", // epicId
+        "bd-w001.1" // stepId
       );
 
       // Verify work was removed from active (paused)
@@ -641,7 +631,7 @@ describe("Dispatcher E2E", () => {
 
       expect(status).toEqual({
         active: [],
-        pending: [],
+        pendingQuestionCount: 0,
         paused: false,
       });
     });

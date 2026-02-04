@@ -1,14 +1,16 @@
 /**
  * State Persistence - Crash recovery support
  *
- * Manages ~/.whs/state.json for tracking active work and pending questions.
+ * Manages ~/.whs/state.json for tracking active work.
  * State is saved after every significant change to enable crash recovery.
+ *
+ * Note: Questions are now tracked as beads in the orchestrator, not in state.
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { ensureConfigDir, getConfigDir } from "./config.js";
-import type { ActiveWork, PendingQuestion, AnsweredQuestion } from "./types.js";
+import type { ActiveWork } from "./types.js";
 
 const STATE_FILE = "state.json";
 const LOCK_FILE = "dispatcher.lock";
@@ -28,37 +30,11 @@ interface SerializedActiveWork {
 }
 
 /**
- * Serializable version of PendingQuestion (dates as ISO strings)
- */
-interface SerializedPendingQuestion {
-  id: string;
-  workItemId: string;
-  project: string;
-  workflowEpicId: string;
-  workflowStepId: string;
-  sessionId: string;
-  worktreePath: string;
-  questions: PendingQuestion["questions"];
-  askedAt: string; // ISO date string
-  context: string;
-}
-
-/**
- * Serializable version of AnsweredQuestion (dates as ISO strings)
- */
-interface SerializedAnsweredQuestion extends SerializedPendingQuestion {
-  answer: string;
-  answeredAt: string; // ISO date string
-}
-
-/**
  * Persisted state structure
  */
 interface PersistedState {
   version: number;
   activeWork: Record<string, SerializedActiveWork>;
-  pendingQuestions: Record<string, SerializedPendingQuestion>;
-  answeredQuestions: Record<string, SerializedAnsweredQuestion>;
   paused: boolean;
   lastUpdated: string; // ISO date string
 }
@@ -68,13 +44,11 @@ interface PersistedState {
  */
 export interface DispatcherState {
   activeWork: Map<string, ActiveWork>;
-  pendingQuestions: Map<string, PendingQuestion>;
-  answeredQuestions: Map<string, AnsweredQuestion>;
   paused: boolean;
   lastUpdated: Date;
 }
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2; // Bumped from 1 - questions moved to beads
 
 /**
  * Gets the path to the state file
@@ -89,8 +63,6 @@ export function getStatePath(): string {
 function createEmptyState(): DispatcherState {
   return {
     activeWork: new Map(),
-    pendingQuestions: new Map(),
-    answeredQuestions: new Map(),
     paused: false,
     lastUpdated: new Date(),
   };
@@ -117,56 +89,6 @@ function deserializeActiveWork(data: SerializedActiveWork): ActiveWork {
 }
 
 /**
- * Serializes PendingQuestion for persistence
- */
-function serializePendingQuestion(
-  question: PendingQuestion
-): SerializedPendingQuestion {
-  return {
-    ...question,
-    askedAt: question.askedAt.toISOString(),
-  };
-}
-
-/**
- * Deserializes PendingQuestion from persistence
- */
-function deserializePendingQuestion(
-  data: SerializedPendingQuestion
-): PendingQuestion {
-  return {
-    ...data,
-    askedAt: new Date(data.askedAt),
-  };
-}
-
-/**
- * Serializes AnsweredQuestion for persistence
- */
-function serializeAnsweredQuestion(
-  question: AnsweredQuestion
-): SerializedAnsweredQuestion {
-  return {
-    ...question,
-    askedAt: question.askedAt.toISOString(),
-    answeredAt: question.answeredAt.toISOString(),
-  };
-}
-
-/**
- * Deserializes AnsweredQuestion from persistence
- */
-function deserializeAnsweredQuestion(
-  data: SerializedAnsweredQuestion
-): AnsweredQuestion {
-  return {
-    ...data,
-    askedAt: new Date(data.askedAt),
-    answeredAt: new Date(data.answeredAt),
-  };
-}
-
-/**
  * Loads state from ~/.whs/state.json
  * Returns empty state if file doesn't exist or is invalid
  */
@@ -182,7 +104,7 @@ export function loadState(): DispatcherState {
     const content = readFileSync(statePath, "utf-8");
     const parsed = JSON.parse(content) as PersistedState;
 
-    // Version check for future migrations
+    // Version check - if old version, start fresh (questions moved to beads)
     if (parsed.version !== CURRENT_VERSION) {
       console.warn(
         `State file version mismatch (got ${parsed.version}, expected ${CURRENT_VERSION}). Starting fresh.`
@@ -196,20 +118,8 @@ export function loadState(): DispatcherState {
       activeWork.set(id, deserializeActiveWork(data));
     }
 
-    const pendingQuestions = new Map<string, PendingQuestion>();
-    for (const [id, data] of Object.entries(parsed.pendingQuestions)) {
-      pendingQuestions.set(id, deserializePendingQuestion(data));
-    }
-
-    const answeredQuestions = new Map<string, AnsweredQuestion>();
-    for (const [id, data] of Object.entries(parsed.answeredQuestions || {})) {
-      answeredQuestions.set(id, deserializeAnsweredQuestion(data));
-    }
-
     return {
       activeWork,
-      pendingQuestions,
-      answeredQuestions,
       paused: parsed.paused ?? false,
       lastUpdated: new Date(parsed.lastUpdated),
     };
@@ -234,21 +144,9 @@ export function saveState(state: DispatcherState): void {
     activeWork[id] = serializeActiveWork(work);
   }
 
-  const pendingQuestions: Record<string, SerializedPendingQuestion> = {};
-  for (const [id, question] of state.pendingQuestions) {
-    pendingQuestions[id] = serializePendingQuestion(question);
-  }
-
-  const answeredQuestions: Record<string, SerializedAnsweredQuestion> = {};
-  for (const [id, question] of state.answeredQuestions) {
-    answeredQuestions[id] = serializeAnsweredQuestion(question);
-  }
-
   const persisted: PersistedState = {
     version: CURRENT_VERSION,
     activeWork,
-    pendingQuestions,
-    answeredQuestions,
     paused: state.paused,
     lastUpdated: new Date().toISOString(),
   };
@@ -320,107 +218,6 @@ export function updateActiveWork(
 }
 
 /**
- * Adds a pending question to state and persists
- */
-export function addPendingQuestion(
-  state: DispatcherState,
-  question: PendingQuestion
-): DispatcherState {
-  const newState: DispatcherState = {
-    ...state,
-    pendingQuestions: new Map(state.pendingQuestions),
-    lastUpdated: new Date(),
-  };
-  newState.pendingQuestions.set(question.id, question);
-  saveState(newState);
-  return newState;
-}
-
-/**
- * Removes a pending question from state and persists
- */
-export function removePendingQuestion(
-  state: DispatcherState,
-  questionId: string
-): DispatcherState {
-  const newState: DispatcherState = {
-    ...state,
-    pendingQuestions: new Map(state.pendingQuestions),
-    lastUpdated: new Date(),
-  };
-  newState.pendingQuestions.delete(questionId);
-  saveState(newState);
-  return newState;
-}
-
-/**
- * Gets a pending question by ID
- */
-export function getPendingQuestion(
-  state: DispatcherState,
-  questionId: string
-): PendingQuestion | undefined {
-  return state.pendingQuestions.get(questionId);
-}
-
-/**
- * Answers a pending question - moves it from pending to answered
- */
-export function answerQuestion(
-  state: DispatcherState,
-  questionId: string,
-  answer: string
-): DispatcherState {
-  const question = state.pendingQuestions.get(questionId);
-  if (!question) {
-    throw new Error(`Question not found: ${questionId}`);
-  }
-
-  const answeredQuestion: AnsweredQuestion = {
-    ...question,
-    answer,
-    answeredAt: new Date(),
-  };
-
-  const newState: DispatcherState = {
-    ...state,
-    pendingQuestions: new Map(state.pendingQuestions),
-    answeredQuestions: new Map(state.answeredQuestions),
-    lastUpdated: new Date(),
-  };
-  newState.pendingQuestions.delete(questionId);
-  newState.answeredQuestions.set(questionId, answeredQuestion);
-  saveState(newState);
-  return newState;
-}
-
-/**
- * Gets all answered questions
- */
-export function getAnsweredQuestions(
-  state: DispatcherState
-): AnsweredQuestion[] {
-  return [...state.answeredQuestions.values()];
-}
-
-/**
- * Removes an answered question from state (after processing)
- */
-export function removeAnsweredQuestion(
-  state: DispatcherState,
-  questionId: string
-): DispatcherState {
-  const newState: DispatcherState = {
-    ...state,
-    answeredQuestions: new Map(state.answeredQuestions),
-    lastUpdated: new Date(),
-  };
-  newState.answeredQuestions.delete(questionId);
-  saveState(newState);
-  return newState;
-}
-
-/**
  * Sets the paused state and persists
  */
 export function setPaused(
@@ -450,7 +247,6 @@ export function clearState(): DispatcherState {
  */
 export function getStateSummary(state: DispatcherState): {
   activeWorkCount: number;
-  pendingQuestionsCount: number;
   paused: boolean;
   activeProjects: string[];
   oldestWork: Date | null;
@@ -467,7 +263,6 @@ export function getStateSummary(state: DispatcherState): {
 
   return {
     activeWorkCount: state.activeWork.size,
-    pendingQuestionsCount: state.pendingQuestions.size,
     paused: state.paused,
     activeProjects: [...activeProjects],
     oldestWork,

@@ -14,21 +14,17 @@ import type {
   Project,
   WorkItem,
   ActiveWork,
-  PendingQuestion,
+  QuestionBeadData,
   Notifier,
 } from "./types.js";
 import { beads } from "./beads/index.js";
-import { expandPath } from "./config.js";
+import { expandPath, loadConfig } from "./config.js";
 import {
   loadState,
   saveState,
   addActiveWork,
   removeActiveWork,
   updateActiveWork,
-  addPendingQuestion,
-  removePendingQuestion,
-  removeAnsweredQuestion,
-  getAnsweredQuestions,
   setPaused,
   acquireLock,
   releaseLock,
@@ -106,8 +102,11 @@ export class Dispatcher {
     if (this.state.activeWork.size > 0) {
       console.log(`   Recovering: ${this.state.activeWork.size} active work items`);
     }
-    if (this.state.pendingQuestions.size > 0) {
-      console.log(`   Pending questions: ${this.state.pendingQuestions.size}`);
+    // Check for pending questions in orchestrator beads
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+    const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+    if (pendingQuestions.length > 0) {
+      console.log(`   Pending questions: ${pendingQuestions.length}`);
     }
     console.log("");
 
@@ -259,20 +258,17 @@ export class Dispatcher {
   }
 
   private async tick(): Promise<void> {
-    // 1. Process any answered questions
-    await this.processAnsweredQuestions();
-
     // Don't start new work if shutting down
     if (!this.isAcceptingWork()) {
       return;
     }
 
-    // 2. Poll orchestrator beads for ready workflow steps
+    // 1. Poll orchestrator beads for ready workflow steps
+    // Note: Steps blocked by question beads won't appear in ready list
     const workflowSteps = this.getReadyWorkflowSteps();
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
       if (this.state.activeWork.has(step.id)) continue;
-      if (this.hasPendingQuestionForStep(step.id)) continue;
 
       // Dispatch asynchronously and track the promise
       const agentPromise = this.dispatchWorkflowStep(step)
@@ -304,18 +300,6 @@ export class Dispatcher {
 
   private isAtCapacity(): boolean {
     return this.state.activeWork.size >= this.config.concurrency.maxTotal;
-  }
-
-  /**
-   * Checks if there's a pending question for a workflow step
-   */
-  private hasPendingQuestionForStep(stepId: string): boolean {
-    for (const question of this.state.pendingQuestions.values()) {
-      if (question.workflowStepId === stepId) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
@@ -469,8 +453,6 @@ export class Dispatcher {
       return;
     }
 
-    // Get workflow context
-    const context = getWorkflowContext(step.id);
     const agent = step.title; // Step title is the agent name
 
     console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId}`);
@@ -531,10 +513,10 @@ export class Dispatcher {
       const result = await runAgent(prompt, {
         cwd: work.worktreePath,
         maxTurns: 50,
-        onOutput: (text) => {
+        onOutput: (_text) => {
           // Could stream to notifier here
         },
-        onToolUse: (tool, input) => {
+        onToolUse: (_tool, _input) => {
           // Could log tool use here
         },
       });
@@ -567,6 +549,9 @@ export class Dispatcher {
 
   /**
    * Handles a pending question from an agent
+   *
+   * Creates a question bead that blocks the workflow step.
+   * When answered via CLI, the question bead is closed which unblocks the step.
    */
   private async handlePendingQuestion(
     work: ActiveWork,
@@ -574,27 +559,36 @@ export class Dispatcher {
   ): Promise<void> {
     if (!result.pendingQuestion) return;
 
-    const questionId = `q-${Date.now()}`;
-    const pendingQuestion: PendingQuestion = {
-      id: questionId,
-      workItemId: work.workItem.id,
-      project: work.workItem.project,
-      workflowEpicId: work.workflowEpicId,
-      workflowStepId: work.workflowStepId,
-      sessionId: result.sessionId,
-      worktreePath: work.worktreePath,
-      questions: result.pendingQuestion.questions,
-      askedAt: new Date(),
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+
+    // Build question bead data (stored as JSON in description)
+    const questionData: QuestionBeadData = {
+      metadata: {
+        session_id: result.sessionId,
+        worktree: work.worktreePath,
+        step_id: work.workflowStepId,
+        epic_id: work.workflowEpicId,
+        project: work.workItem.project,
+        asked_at: new Date().toISOString(),
+      },
       context: result.pendingQuestion.context,
+      questions: result.pendingQuestion.questions,
     };
 
-    this.state = addPendingQuestion(this.state, pendingQuestion);
+    // Create question bead that blocks the step
+    const questionBead = beads.createQuestion(
+      `Question: ${result.pendingQuestion.questions[0]?.question || "Agent needs input"}`,
+      orchestratorPath,
+      questionData,
+      work.workflowEpicId,
+      work.workflowStepId
+    );
 
-    // Remove from active work (paused)
+    // Remove from active work (paused until answered)
     this.state = removeActiveWork(this.state, work.workItem.id);
 
-    await this.notifier.notifyQuestion(pendingQuestion);
-    console.log(`❓ Question pending: ${questionId}`);
+    await this.notifier.notifyQuestion(questionBead.id, questionData);
+    console.log(`❓ Question pending: ${questionBead.id}`);
   }
 
   /**
@@ -603,7 +597,7 @@ export class Dispatcher {
   private async processHandoff(
     work: ActiveWork,
     handoff: { next_agent: string; pr_number?: number; ci_status?: string; context: string },
-    stepCost: number
+    _stepCost: number
   ): Promise<void> {
     console.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
 
@@ -744,97 +738,44 @@ export class Dispatcher {
   // === Public API for CLI ===
 
   /**
-   * Processes any answered questions from state
-   * Called at the start of each tick to handle answers submitted via CLI
-   */
-  private async processAnsweredQuestions(): Promise<void> {
-    const answered = getAnsweredQuestions(this.state);
-    if (answered.length === 0) return;
-
-    console.log(`📝 Processing ${answered.length} answered question(s)`);
-
-    for (const question of answered) {
-      try {
-        // Remove from answered queue first
-        this.state = removeAnsweredQuestion(this.state, question.id);
-
-        // Resume the agent session with the answer
-        const result = await resumeWithAnswer(question.sessionId, question.answer, {
-          cwd: question.worktreePath,
-          maxTurns: 50,
-        });
-
-        // Recreate active work entry
-        const workItem: WorkItem = {
-          id: question.workItemId,
-          project: question.project,
-          title: "",
-          description: "",
-          priority: 2,
-          type: "task",
-          status: "in_progress",
-          labels: [],
-          dependencies: [],
-        };
-
-        const work: ActiveWork = {
-          workItem,
-          workflowEpicId: question.workflowEpicId,
-          workflowStepId: question.workflowStepId,
-          sessionId: result.sessionId,
-          worktreePath: question.worktreePath,
-          startedAt: new Date(),
-          agent: "unknown",
-          costSoFar: result.costUsd,
-        };
-
-        // Check for another question
-        if (result.pendingQuestion) {
-          await this.handlePendingQuestion(work, result);
-          continue;
-        }
-
-        // Get handoff and process
-        const handoff = await getHandoff(
-          result.output,
-          result.sessionId,
-          question.worktreePath
-        );
-
-        await this.processHandoff(work, handoff, result.costUsd);
-      } catch (err) {
-        console.error(`Error processing answered question ${question.id}:`, err);
-      }
-    }
-  }
-
-  /**
-   * Answers a pending question and resumes the agent
-   * @deprecated Use CLI `whs answer` which writes to state, processed by tick loop
+   * Answers a pending question bead and resumes the agent session
+   *
+   * Flow:
+   * 1. Mark the blocked step as in_progress (prevents race)
+   * 2. Answer and close the question bead (unblocks step)
+   * 3. Resume the agent session with the answer
+   * 4. Process the result (may create new question or handoff)
    */
   async answerQuestion(questionId: string, answer: string): Promise<void> {
-    const question = this.state.pendingQuestions.get(questionId);
-    if (!question) {
-      throw new Error(`Unknown question: ${questionId}`);
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+
+    // Get the question bead
+    const questionBead = beads.show(questionId, orchestratorPath);
+    if (!questionBead || questionBead.type !== "question" || questionBead.status !== "open") {
+      throw new Error(`Question not found or already answered: ${questionId}`);
     }
 
+    // Parse question data from description
+    const questionData = beads.parseQuestionData(questionBead);
     console.log(`📝 Answering question ${questionId}`);
 
-    // Remove from pending
-    this.state = removePendingQuestion(this.state, questionId);
+    // 1. Mark the blocked step as in_progress FIRST (prevents race condition)
+    markStepInProgress(questionData.metadata.step_id);
 
-    // Resume the agent session
-    const result = await resumeWithAnswer(question.sessionId, answer, {
-      cwd: question.worktreePath,
+    // 2. Answer and close the question bead
+    beads.answerQuestion(questionId, answer, orchestratorPath);
+
+    // 3. Resume the agent session with the answer
+    const result = await resumeWithAnswer(questionData.metadata.session_id, answer, {
+      cwd: questionData.metadata.worktree,
       maxTurns: 50,
     });
 
-    // Recreate active work entry
-    const project = this.projects.get(question.project);
+    // 4. Recreate active work entry
     const workItem: WorkItem = {
-      id: question.workItemId,
-      project: question.project,
-      title: "", // Would need to fetch from bead
+      id: questionData.metadata.step_id, // Use step_id as work item id
+      project: questionData.metadata.project,
+      title: "",
       description: "",
       priority: 2,
       type: "task",
@@ -845,10 +786,10 @@ export class Dispatcher {
 
     const work: ActiveWork = {
       workItem,
-      workflowEpicId: question.workflowEpicId,
-      workflowStepId: question.workflowStepId,
+      workflowEpicId: questionData.metadata.epic_id,
+      workflowStepId: questionData.metadata.step_id,
       sessionId: result.sessionId,
-      worktreePath: question.worktreePath,
+      worktreePath: questionData.metadata.worktree,
       startedAt: new Date(),
       agent: "unknown", // Would need to extract from step
       costSoFar: result.costUsd,
@@ -860,14 +801,26 @@ export class Dispatcher {
       return;
     }
 
-    // Get handoff
+    // Get handoff and process
     const handoff = await getHandoff(
       result.output,
       result.sessionId,
-      question.worktreePath
+      questionData.metadata.worktree
     );
 
     await this.processHandoff(work, handoff, result.costUsd);
+  }
+
+  /**
+   * Gets pending questions from orchestrator beads
+   */
+  getPendingQuestions(): Array<{ id: string; data: QuestionBeadData }> {
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+    const questionBeads = beads.listPendingQuestions(orchestratorPath);
+    return questionBeads.map((bead) => ({
+      id: bead.id,
+      data: beads.parseQuestionData(bead),
+    }));
   }
 
   /**
@@ -875,12 +828,15 @@ export class Dispatcher {
    */
   getStatus(): {
     active: ActiveWork[];
-    pending: PendingQuestion[];
+    pendingQuestionCount: number;
     paused: boolean;
   } {
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+    const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+
     return {
       active: [...this.state.activeWork.values()],
-      pending: [...this.state.pendingQuestions.values()],
+      pendingQuestionCount: pendingQuestions.length,
       paused: this.state.paused,
     };
   }

@@ -6,7 +6,7 @@ export interface Bead {
   id: string;
   title: string;
   description: string;
-  type: "epic" | "task" | "bug" | "feature" | "chore";
+  type: "epic" | "task" | "bug" | "feature" | "chore" | "question";
   status: "open" | "in_progress" | "blocked" | "deferred" | "closed" | "tombstone" | "pinned";
   priority: number; // 0-4, where 0 is critical
   labels: string[];

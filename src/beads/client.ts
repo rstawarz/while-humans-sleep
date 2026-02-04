@@ -308,6 +308,62 @@ export class BeadsClient {
     }
   }
 
+  // ============================================================
+  // Question Management (questions are beads that block steps)
+  // ============================================================
+
+  /**
+   * Create a question bead that blocks a workflow step
+   *
+   * @param title - Question title (e.g., "Question: Which epic?")
+   * @param cwd - Orchestrator path
+   * @param data - Structured question data (stored as JSON in description)
+   * @param parentEpicId - Parent workflow epic
+   * @param blocksStepId - Step ID that this question blocks
+   */
+  createQuestion(
+    title: string,
+    cwd: string,
+    data: import("../types.js").QuestionBeadData,
+    parentEpicId: string,
+    blocksStepId: string
+  ): Bead {
+    // Create question bead
+    const question = this.create(title, cwd, {
+      type: "question",
+      parent: parentEpicId,
+      description: JSON.stringify(data, null, 2),
+    });
+
+    // Add dependency: question blocks the step
+    this.depAdd(blocksStepId, question.id, cwd);
+
+    return question;
+  }
+
+  /**
+   * List pending (open) questions in the orchestrator
+   */
+  listPendingQuestions(cwd: string): Bead[] {
+    return this.list(cwd, { type: "question", status: "open" });
+  }
+
+  /**
+   * Parse question bead data from description
+   */
+  parseQuestionData(bead: Bead): import("../types.js").QuestionBeadData {
+    return JSON.parse(bead.description);
+  }
+
+  /**
+   * Answer a question: add comment, close the question bead
+   * Note: Caller should mark step as in_progress BEFORE calling this
+   */
+  answerQuestion(questionId: string, answer: string, cwd: string): void {
+    this.comment(questionId, `Answer: ${answer}`, cwd);
+    this.close(questionId, "Answered", cwd);
+  }
+
   /**
    * Escape double quotes in strings for shell commands
    */

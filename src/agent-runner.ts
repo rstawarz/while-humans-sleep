@@ -6,7 +6,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { Question, PendingQuestion } from "./types.js";
+import type { Question } from "./types.js";
 import { recordStepComplete } from "./metrics.js";
 import { resolve, relative, isAbsolute } from "path";
 

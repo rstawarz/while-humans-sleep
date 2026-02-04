@@ -74,28 +74,27 @@ export interface Question {
   multiSelect: boolean;
 }
 
-export interface PendingQuestion {
-  id: string;
-  workItemId: string;
-  project: string;
-  workflowEpicId: string;
-  workflowStepId: string;
-  sessionId: string;
-  worktreePath: string;
-  questions: Question[];
-  askedAt: Date;
+/**
+ * Structured data stored in question bead description (JSON)
+ * Questions are now beads in the orchestrator that block workflow steps.
+ */
+export interface QuestionBeadData {
+  metadata: {
+    session_id: string;
+    worktree: string;
+    step_id: string;
+    epic_id: string;
+    project: string;
+    asked_at: string;
+  };
   context: string;
-}
-
-export interface AnsweredQuestion extends PendingQuestion {
-  answer: string;
-  answeredAt: Date;
+  questions: Question[];
 }
 
 // === Notifier ===
 
 export interface Notifier {
-  notifyQuestion(question: PendingQuestion): Promise<void>;
+  notifyQuestion(questionBeadId: string, data: QuestionBeadData): Promise<void>;
   notifyProgress(work: ActiveWork, message: string): Promise<void>;
   notifyComplete(work: ActiveWork, result: "done" | "blocked"): Promise<void>;
   notifyError(work: ActiveWork, error: Error): Promise<void>;

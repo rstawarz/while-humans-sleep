@@ -2,16 +2,16 @@
  * CLI Notifier - MVP notification via console output
  */
 
-import type { Notifier, PendingQuestion, ActiveWork } from "../types.js";
+import type { Notifier, QuestionBeadData, ActiveWork } from "../types.js";
 
 export class CLINotifier implements Notifier {
-  async notifyQuestion(question: PendingQuestion): Promise<void> {
+  async notifyQuestion(questionBeadId: string, data: QuestionBeadData): Promise<void> {
     console.log("\n" + "=".repeat(60));
-    console.log(`❓ QUESTION from ${question.project}/${question.workItemId}`);
-    console.log(`Context: ${question.context}`);
+    console.log(`❓ QUESTION from ${data.metadata.project}/${data.metadata.step_id}`);
+    console.log(`Context: ${data.context}`);
     console.log("-".repeat(60));
 
-    for (const q of question.questions) {
+    for (const q of data.questions) {
       console.log(`Q: ${q.question}`);
       if (q.options && q.options.length > 0) {
         q.options.forEach((opt, i) => {
@@ -21,7 +21,7 @@ export class CLINotifier implements Notifier {
     }
 
     console.log("-".repeat(60));
-    console.log(`Answer with: whs answer ${question.id} "your answer"`);
+    console.log(`Answer with: whs answer ${questionBeadId} "your answer"`);
     console.log("=".repeat(60) + "\n");
   }
 
