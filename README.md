@@ -62,14 +62,14 @@ npm link
 ### Setup
 
 ```bash
-# 1. Add a project
+# 1. Initialize WHS (run once)
+whs init
+
+# 2. Add a project
 whs add myproject ~/work/myproject
 
-# 2. Initialize beads in your project (if not already)
+# 3. Create some tasks (in your project directory)
 cd ~/work/myproject
-bd init
-
-# 3. Create some tasks
 bd create "Add user authentication" -p 1 -t task
 bd create "Fix login bug" -p 0 -t bug
 
@@ -78,6 +78,20 @@ whs start
 ```
 
 ## CLI Commands
+
+### `whs init`
+
+Initialize WHS (run once before adding projects).
+
+```bash
+whs init                                    # Use default orchestrator location
+whs init --orchestrator ~/my/whs-orch       # Custom orchestrator location
+```
+
+This creates:
+- `~/.whs/config.json` — Configuration file
+- Orchestrator directory with git + beads initialized
+- Beads daemon running with sync-branch configured
 
 ### `whs add <name> <path>`
 
