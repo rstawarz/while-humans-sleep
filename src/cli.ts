@@ -31,6 +31,7 @@ import {
   getStatePath,
   answerQuestion as answerQuestionState,
   getPendingQuestion,
+  getLockInfo,
 } from "./state.js";
 
 const program = new Command();
@@ -143,13 +144,90 @@ program
     const notifier = new CLINotifier();
     const dispatcher = new Dispatcher(config, notifier);
 
-    // Handle graceful shutdown
+    // Handle graceful shutdown (Ctrl+C)
+    // First Ctrl+C: graceful shutdown (wait for agents)
+    // Second Ctrl+C: force stop
     process.on("SIGINT", async () => {
-      await dispatcher.stop();
+      await dispatcher.requestShutdown();
       process.exit(0);
     });
 
     await dispatcher.start();
+  });
+
+program
+  .command("restart")
+  .description("Gracefully restart the dispatcher (wait for agents, then restart)")
+  .action(async () => {
+    // Check if WHS is initialized
+    if (!isInitialized()) {
+      console.error("Error: WHS is not initialized.");
+      console.error("Run `whs init` first to set up the orchestrator.");
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+
+    // Check if dispatcher is running
+    const lockInfo = getLockInfo();
+    if (!lockInfo) {
+      console.log("No dispatcher running. Starting fresh...");
+      // Just start normally
+      const { spawn } = await import("child_process");
+      const child = spawn(process.execPath, [process.argv[1], "start"], {
+        detached: true,
+        stdio: "inherit",
+      });
+      child.unref();
+      return;
+    }
+
+    console.log("🔄 Restarting dispatcher...");
+    console.log(`   Current PID: ${lockInfo.pid}`);
+    console.log(`   Sending graceful shutdown signal...`);
+
+    // Send SIGINT to trigger graceful shutdown
+    try {
+      process.kill(lockInfo.pid, "SIGINT");
+    } catch (err) {
+      console.error(`Failed to signal process: ${err}`);
+      process.exit(1);
+    }
+
+    // Wait for process to exit
+    console.log("   Waiting for shutdown...");
+    let attempts = 0;
+    const maxAttempts = 120; // 2 minutes max
+    while (attempts < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        process.kill(lockInfo.pid, 0); // Check if still running
+        attempts++;
+        if (attempts % 10 === 0) {
+          console.log(`   Still waiting... (${attempts}s)`);
+        }
+      } catch {
+        // Process exited
+        break;
+      }
+    }
+
+    if (attempts >= maxAttempts) {
+      console.error("   Timeout waiting for shutdown. Try `whs start` manually.");
+      process.exit(1);
+    }
+
+    console.log("   Shutdown complete. Starting new dispatcher...\n");
+
+    // Start new dispatcher (in foreground, replacing this process)
+    const { spawn } = await import("child_process");
+    const child = spawn(process.execPath, [process.argv[1], "start"], {
+      stdio: "inherit",
+    });
+
+    child.on("exit", (code) => {
+      process.exit(code ?? 0);
+    });
   });
 
 program
