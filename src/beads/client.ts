@@ -100,7 +100,7 @@ export class BeadsClient {
     if (options?.type) args.push("-t", options.type);
     if (options?.priority !== undefined) args.push("-p", String(options.priority));
     if (options?.parent) args.push("--parent", options.parent);
-    if (options?.status) args.push("--status", options.status);
+    // Note: bd create doesn't support --status, issues are created as "open"
     if (options?.labels?.length) {
       for (const label of options.labels) {
         args.push("--label", label);
@@ -110,7 +110,14 @@ export class BeadsClient {
       args.push("--description", `"${this.escapeQuotes(options.description)}"`);
     }
 
-    return this.exec(args, cwd) as Bead;
+    const bead = this.exec(args, cwd) as Bead;
+
+    // If a non-open status was requested, update the bead after creation
+    if (options?.status && options.status !== "open") {
+      return this.update(bead.id, cwd, { status: options.status });
+    }
+
+    return bead;
   }
 
   /**

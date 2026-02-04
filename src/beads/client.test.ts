@@ -196,10 +196,39 @@ describe("BeadsClient", () => {
         description: "Add JWT authentication",
       });
 
+      // Note: --status is not passed to create (open is default)
       expect(mockExecSync).toHaveBeenCalledWith(
-        'bd create "Implement auth" -t task -p 1 --parent bd-epic1 --status open --label backend --label urgent --description "Add JWT authentication" --json',
+        'bd create "Implement auth" -t task -p 1 --parent bd-epic1 --label backend --label urgent --description "Add JWT authentication" --json',
         expect.any(Object)
       );
+    });
+
+    it("creates bead with non-open status by calling update after create", () => {
+      const createdBead = { ...sampleBead, status: "open" };
+      const updatedBead = { ...sampleBead, status: "blocked" };
+
+      // First call returns created bead, second call returns updated bead
+      mockExecSync
+        .mockReturnValueOnce(JSON.stringify(createdBead))
+        .mockReturnValueOnce(JSON.stringify(updatedBead));
+
+      const result = client.create("Blocked task", testCwd, {
+        status: "blocked",
+      });
+
+      // Should call create first
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'bd create "Blocked task" --json',
+        expect.any(Object)
+      );
+
+      // Then call update to set status
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'bd update bd-a1b2 --status blocked --json',
+        expect.any(Object)
+      );
+
+      expect(result.status).toBe("blocked");
     });
 
     it("escapes quotes in title", () => {
