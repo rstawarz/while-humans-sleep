@@ -252,3 +252,36 @@ export function expandPath(path: string): string {
   }
   return path;
 }
+
+/**
+ * Checks if WHS has been initialized
+ */
+export function isInitialized(): boolean {
+  return existsSync(CONFIG_PATH);
+}
+
+/**
+ * Initializes WHS with the given orchestrator path
+ */
+export function initializeWhs(orchestratorPath: string): Config {
+  ensureConfigDir();
+
+  if (existsSync(CONFIG_PATH)) {
+    throw new Error("WHS is already initialized. Config exists at " + CONFIG_PATH);
+  }
+
+  const config: Config = {
+    ...DEFAULT_CONFIG,
+    orchestratorPath: expandPath(orchestratorPath),
+  };
+
+  saveConfig(config);
+  return config;
+}
+
+/**
+ * Gets the default orchestrator path
+ */
+export function getDefaultOrchestratorPath(): string {
+  return DEFAULT_CONFIG.orchestratorPath;
+}
