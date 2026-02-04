@@ -175,10 +175,25 @@ export class BeadsClient {
   /**
    * Initialize beads in a project
    */
-  init(cwd: string, stealth: boolean = false): void {
+  init(cwd: string, options?: { stealth?: boolean; prefix?: string }): void {
     const args = ["init"];
-    if (stealth) args.push("--stealth");
+    if (options?.stealth) args.push("--stealth");
+    if (options?.prefix) args.push("-p", options.prefix);
     this.execRaw(args, cwd);
+  }
+
+  /**
+   * Set the issue prefix for an existing beads repo
+   */
+  setPrefix(prefix: string, cwd: string): void {
+    this.configSet("issue_prefix", prefix, cwd);
+  }
+
+  /**
+   * Get the current issue prefix
+   */
+  getPrefix(cwd: string): string | null {
+    return this.configGet("issue_prefix", cwd);
   }
 
   /**

@@ -45,6 +45,7 @@ program
   .command("init")
   .description("Initialize WHS (run once before adding projects)")
   .option("-o, --orchestrator <path>", "Orchestrator beads location", getDefaultOrchestratorPath())
+  .option("-p, --prefix <prefix>", "Bead ID prefix for orchestrator", "orc")
   .action(async (options) => {
     // Check if already initialized
     if (isInitialized()) {
@@ -82,10 +83,18 @@ program
       execSync("git init", { cwd: orchestratorPath, stdio: "pipe" });
     }
 
-    // 4. Initialize beads
+    // 4. Initialize beads with custom prefix
     if (!beads.isInitialized(orchestratorPath)) {
       console.log("Initializing beads...");
-      beads.init(orchestratorPath, false);
+      beads.init(orchestratorPath, { prefix: options.prefix });
+      console.log(`  Prefix: ${options.prefix}`);
+    } else {
+      // Update prefix on existing repo if different
+      const currentPrefix = beads.getPrefix(orchestratorPath);
+      if (currentPrefix !== options.prefix) {
+        console.log(`Updating beads prefix to: ${options.prefix}`);
+        beads.setPrefix(options.prefix, orchestratorPath);
+      }
     }
 
     // 5. Configure sync-branch and start daemon
@@ -297,6 +306,7 @@ program
   .description("Add a project to manage")
   .option("-b, --branch <branch>", "Base branch", "main")
   .option("-s, --stealth", "Use beads stealth mode (local only)")
+  .option("-p, --prefix <prefix>", "Bead ID prefix (default: project name)")
   .option("-a, --agents-path <path>", "Path to agent definitions", "docs/llm/agents")
   .action(async (name, projectPath, options) => {
     // Check if WHS is initialized
@@ -352,17 +362,27 @@ program
     }
 
     // 5. Initialize beads if not present
+    const prefix = options.prefix || name;
     if (!beads.isInitialized(resolvedPath)) {
       console.log("Initializing beads...");
       try {
-        beads.init(resolvedPath, options.stealth);
+        beads.init(resolvedPath, { stealth: options.stealth, prefix });
         console.log(`  Beads initialized (${beadsMode} mode)`);
+        console.log(`  Prefix: ${prefix}`);
       } catch (err) {
         console.error(`Error initializing beads: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     } else {
       console.log("  Beads already initialized");
+      // Update prefix if specified and different
+      const currentPrefix = beads.getPrefix(resolvedPath);
+      if (options.prefix && currentPrefix !== options.prefix) {
+        console.log(`  Updating prefix to: ${options.prefix}`);
+        beads.setPrefix(options.prefix, resolvedPath);
+      } else {
+        console.log(`  Prefix: ${currentPrefix || "(default)"}`);
+      }
     }
 
     // 6. Configure beads sync-branch and start daemon

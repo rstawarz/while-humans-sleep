@@ -325,12 +325,71 @@ describe("BeadsClient", () => {
     it("initializes in stealth mode", () => {
       mockExecSync.mockReturnValue("");
 
-      client.init(testCwd, true);
+      client.init(testCwd, { stealth: true });
 
       expect(mockExecSync).toHaveBeenCalledWith(
         "bd init --stealth",
         expect.any(Object)
       );
+    });
+
+    it("initializes with custom prefix", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.init(testCwd, { prefix: "myproj" });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd init -p myproj",
+        expect.any(Object)
+      );
+    });
+
+    it("initializes with stealth and prefix", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.init(testCwd, { stealth: true, prefix: "myproj" });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd init --stealth -p myproj",
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe("setPrefix", () => {
+    it("sets the issue prefix via config", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.setPrefix("myproj", testCwd);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd config set issue_prefix myproj",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+  });
+
+  describe("getPrefix", () => {
+    it("returns the current issue prefix", () => {
+      mockExecSync.mockReturnValue("myproj");
+
+      const result = client.getPrefix(testCwd);
+
+      expect(result).toBe("myproj");
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd config get issue_prefix",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+
+    it("returns null if prefix not set", () => {
+      mockExecSync.mockImplementation(() => {
+        throw new Error("config key not found");
+      });
+
+      const result = client.getPrefix(testCwd);
+
+      expect(result).toBeNull();
     });
   });
 
