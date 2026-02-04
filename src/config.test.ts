@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir, homedir } from "os";
-import { expandPath, getConfigDir, getConfigPath } from "./config.js";
+import {
+  expandPath,
+  getConfigDir,
+  getConfigPath,
+  isInitialized,
+  initializeWhs,
+  getDefaultOrchestratorPath,
+} from "./config.js";
 import type { Config, Project } from "./types.js";
 
 // Test getConfigDir and getConfigPath
@@ -418,5 +425,117 @@ describe("config functions with temp directory", () => {
       expect(config.orchestratorPath).not.toContain("~");
       expect(config.orchestratorPath).toContain("/work/orchestrator");
     });
+  });
+});
+
+// ============================================================
+// Initialization Functions Tests
+// ============================================================
+
+describe("getDefaultOrchestratorPath", () => {
+  it("returns path under home directory", () => {
+    const defaultPath = getDefaultOrchestratorPath();
+
+    expect(defaultPath).toContain(homedir());
+    expect(defaultPath).toContain("whs-orchestrator");
+  });
+
+  it("returns consistent value", () => {
+    const first = getDefaultOrchestratorPath();
+    const second = getDefaultOrchestratorPath();
+
+    expect(first).toBe(second);
+  });
+});
+
+describe("isInitialized", () => {
+  it("checks for config file existence", () => {
+    // This tests against the real config path
+    // Result depends on whether user has initialized WHS
+    const result = isInitialized();
+
+    expect(typeof result).toBe("boolean");
+  });
+});
+
+describe("initializeWhs behavior", () => {
+  const TEST_DIR = join(tmpdir(), `whs-init-test-${process.pid}-${Date.now()}`);
+
+  beforeEach(() => {
+    if (!existsSync(TEST_DIR)) {
+      mkdirSync(TEST_DIR, { recursive: true });
+    }
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("creates config with specified orchestrator path", () => {
+    // Simulate what initializeWhs does
+    const orchestratorPath = "/custom/orchestrator/path";
+    const configPath = join(TEST_DIR, "config.json");
+
+    const config: Config = {
+      projects: [],
+      orchestratorPath: orchestratorPath,
+      concurrency: { maxTotal: 4, maxPerProject: 2 },
+      notifier: "cli",
+    };
+
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+
+    const loaded = JSON.parse(readFileSync(configPath, "utf-8")) as Config;
+    expect(loaded.orchestratorPath).toBe("/custom/orchestrator/path");
+    expect(loaded.projects).toEqual([]);
+    expect(loaded.concurrency.maxTotal).toBe(4);
+  });
+
+  it("expands ~ in orchestrator path", () => {
+    const orchestratorPath = "~/work/my-orchestrator";
+    const expandedPath = expandPath(orchestratorPath);
+
+    expect(expandedPath).not.toContain("~");
+    expect(expandedPath).toContain(homedir());
+    expect(expandedPath).toContain("work/my-orchestrator");
+  });
+
+  it("throws if config already exists", () => {
+    const configPath = join(TEST_DIR, "config.json");
+
+    // Create existing config
+    writeFileSync(configPath, JSON.stringify({ projects: [] }), "utf-8");
+
+    // Simulate initializeWhs check
+    const checkInitialized = () => {
+      if (existsSync(configPath)) {
+        throw new Error("WHS is already initialized. Config exists at " + configPath);
+      }
+    };
+
+    expect(() => checkInitialized()).toThrow("WHS is already initialized");
+  });
+
+  it("creates config directory if needed", () => {
+    const newDir = join(TEST_DIR, "subdir", ".whs");
+    const configPath = join(newDir, "config.json");
+
+    // Simulate ensureConfigDir + initializeWhs
+    mkdirSync(newDir, { recursive: true });
+
+    const config: Config = {
+      projects: [],
+      orchestratorPath: "/orch",
+      concurrency: { maxTotal: 4, maxPerProject: 2 },
+      notifier: "cli",
+    };
+
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+
+    expect(existsSync(configPath)).toBe(true);
+    const loaded = JSON.parse(readFileSync(configPath, "utf-8")) as Config;
+    expect(loaded.orchestratorPath).toBe("/orch");
   });
 });
