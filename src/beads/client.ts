@@ -193,6 +193,96 @@ export class BeadsClient {
     }
   }
 
+  // ============================================================
+  // Configuration
+  // ============================================================
+
+  /**
+   * Set a beads config value
+   */
+  configSet(key: string, value: string, cwd: string): void {
+    this.execRaw(["config", "set", key, value], cwd);
+  }
+
+  /**
+   * Get a beads config value
+   */
+  configGet(key: string, cwd: string): string | null {
+    try {
+      return this.execRaw(["config", "get", key], cwd);
+    } catch {
+      return null;
+    }
+  }
+
+  // ============================================================
+  // Daemon Management
+  // ============================================================
+
+  /**
+   * Start the beads daemon for a project
+   */
+  daemonStart(cwd: string, options?: { autoCommit?: boolean }): void {
+    const args = ["daemon", "start"];
+    if (options?.autoCommit) args.push("--auto-commit");
+    this.execRaw(args, cwd);
+  }
+
+  /**
+   * Stop the beads daemon for a project
+   */
+  daemonStop(cwd: string): void {
+    try {
+      this.execRaw(["daemon", "stop"], cwd);
+    } catch {
+      // Daemon might not be running, ignore
+    }
+  }
+
+  /**
+   * Get daemon status for a project
+   */
+  daemonStatus(cwd: string): { running: boolean; pid?: number } {
+    try {
+      const output = this.execRaw(["daemon", "status"], cwd);
+      const running = output.includes("running");
+      const pidMatch = output.match(/PID\s+(\d+)/);
+      return {
+        running,
+        pid: pidMatch ? parseInt(pidMatch[1], 10) : undefined,
+      };
+    } catch {
+      return { running: false };
+    }
+  }
+
+  /**
+   * Check if daemon is running for a project
+   */
+  isDaemonRunning(cwd: string): boolean {
+    return this.daemonStatus(cwd).running;
+  }
+
+  /**
+   * Ensure daemon is running with sync-branch configured
+   *
+   * This is the recommended setup for WHS projects:
+   * - Configures sync-branch to keep beads commits separate from code
+   * - Starts daemon with auto-commit for immediate persistence
+   */
+  ensureDaemonWithSyncBranch(cwd: string, syncBranch: string = "beads-sync"): void {
+    // Configure sync-branch if not already set
+    const currentSyncBranch = this.configGet("sync.branch", cwd);
+    if (currentSyncBranch !== syncBranch) {
+      this.configSet("sync.branch", syncBranch, cwd);
+    }
+
+    // Start daemon if not running
+    if (!this.isDaemonRunning(cwd)) {
+      this.daemonStart(cwd, { autoCommit: true });
+    }
+  }
+
   /**
    * Escape double quotes in strings for shell commands
    */
