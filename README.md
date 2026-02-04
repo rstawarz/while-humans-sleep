@@ -296,6 +296,38 @@ Agents CANNOT:
 - Create or delete beads
 - Modify orchestrator beads
 
+### Beads and Worktrees
+
+Beads has built-in worktree support — all worktrees share the same `.beads/` database in the main repository. When an agent in a worktree runs `bd comment`, it writes to the shared database, immediately visible to all other agents and the dispatcher.
+
+**Sync Branch Configuration**
+
+WHS automatically configures a `beads-sync` branch for each project:
+
+```bash
+# This happens automatically during `whs add`
+bd config set sync.branch beads-sync
+bd daemon start --auto-commit
+```
+
+This ensures:
+- Beads commits go to `beads-sync` branch, not your working branch
+- Main stays clean for PR merges (no beads file conflicts)
+- Changes are auto-committed by the daemon
+
+**Daemon Management**
+
+The beads daemon runs per-project and is started automatically:
+- `whs add` configures and starts the daemon
+- `whs start` verifies daemons are running for all projects
+
+Check daemon status manually:
+```bash
+cd ~/work/myproject
+bd daemon status        # Check this project
+bd daemon list          # List all running daemons
+```
+
 ## Worktrees
 
 Each task runs in an isolated git worktree:

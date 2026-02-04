@@ -166,20 +166,27 @@ Add validation step when projects are added via `whs add`:
 **Prerequisites to validate:**
 1. `wt --version` succeeds (worktrunk is installed)
 2. `git --version` succeeds (git is installed)
-3. Target path exists and is a valid git repository (`git rev-parse --git-dir`)
+3. `bd --version` succeeds (beads is installed)
+4. Target path exists and is a valid git repository (`git rev-parse --git-dir`)
+
+**Beads daemon setup (IMPLEMENTED):**
+- Configure `sync.branch` to `beads-sync` for worktree support
+- Start daemon with `--auto-commit` for automatic persistence
+- This keeps beads commits separate from code, preventing merge conflicts
 
 **Optional enhancements:**
 - Suggest creating `.config/wt.toml` for project hooks (e.g., `post-create = "npm ci"`)
 - Warn if worktree base directory isn't writable
 - Check worktrunk version compatibility (if needed)
+- Add daemon health monitoring during dispatcher operation
 
 **Implementation location:** `src/config.ts` or new `src/validation.ts`
 
-**Research notes (from worktrunk docs):**
-- No `wt init` required - worktrunk works with any git repo
-- Default worktree path: `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`
-- Shell integration NOT needed for WHS (we pass `cwd` to execSync)
-- Project hooks defined in `.config/wt.toml` are optional but useful
+**Research notes:**
+- Worktrunk: No `wt init` required, works with any git repo
+- Worktrunk: WHS sets path template to `{{ repo_path }}-worktrees/{{ branch | sanitize }}`
+- Beads: Shared `.beads/` database across all worktrees (automatic)
+- Beads: Daemon with sync-branch keeps main clean for PR merges
 
 ---
 
