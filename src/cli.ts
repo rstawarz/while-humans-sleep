@@ -41,6 +41,30 @@ program
   .description("Start the dispatcher")
   .action(async () => {
     const config = loadConfig();
+
+    // Ensure beads daemons are running for all projects
+    console.log("Checking beads daemons...");
+    for (const project of config.projects) {
+      const projectPath = expandPath(project.repoPath);
+      try {
+        beads.ensureDaemonWithSyncBranch(projectPath, "beads-sync");
+        console.log(`  ${project.name}: daemon running`);
+      } catch (err) {
+        console.warn(`  ${project.name}: daemon error - ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Also ensure orchestrator daemon is running
+    const orchestratorPath = expandPath(config.orchestratorPath);
+    try {
+      beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
+      console.log(`  orchestrator: daemon running`);
+    } catch (err) {
+      console.warn(`  orchestrator: daemon error - ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    console.log("");
+
     const notifier = new CLINotifier();
     const dispatcher = new Dispatcher(config, notifier);
 
@@ -144,7 +168,27 @@ program
       console.log("  Beads initialized in orchestrator");
     }
 
-    // 7. Add project to config
+    // 7. Configure beads sync-branch and start daemon
+    // This ensures beads commits go to a separate branch, keeping main clean for PR merges
+    console.log("Configuring beads daemon...");
+    try {
+      beads.ensureDaemonWithSyncBranch(resolvedPath, "beads-sync");
+      console.log("  Sync branch: beads-sync");
+      console.log("  Daemon started with auto-commit");
+    } catch (err) {
+      console.warn(`  Warning: Could not start beads daemon: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn("  You may need to start it manually: bd daemon start --auto-commit");
+    }
+
+    // 8. Also configure daemon for orchestrator
+    try {
+      beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
+      console.log("  Orchestrator daemon configured");
+    } catch (err) {
+      console.warn(`  Warning: Could not start orchestrator daemon: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 9. Add project to config
     const added = addProject(name, resolvedPath, {
       baseBranch: options.branch,
       agentsPath: options.agentsPath,
@@ -317,6 +361,7 @@ program
   .description("Show dispatcher status")
   .option("-v, --verbose", "Show detailed information")
   .action((options) => {
+    const config = loadConfig();
     const state = loadState();
     const summary = getStateSummary(state);
 
@@ -343,29 +388,57 @@ program
     // Pending questions
     console.log(`  Pending questions: ${summary.pendingQuestionsCount}`);
 
+    // Beads daemon status
+    console.log(`\n🔮 Beads Daemons\n`);
+    let allDaemonsRunning = true;
+
+    for (const project of config.projects) {
+      const projectPath = expandPath(project.repoPath);
+      const status = beads.daemonStatus(projectPath);
+      const statusIcon = status.running ? "✓" : "✗";
+      const statusText = status.running ? `running (PID ${status.pid})` : "stopped";
+      console.log(`  ${statusIcon} ${project.name}: ${statusText}`);
+      if (!status.running) allDaemonsRunning = false;
+    }
+
+    // Orchestrator daemon
+    const orchestratorPath = expandPath(config.orchestratorPath);
+    const orchStatus = beads.daemonStatus(orchestratorPath);
+    const orchIcon = orchStatus.running ? "✓" : "✗";
+    const orchText = orchStatus.running ? `running (PID ${orchStatus.pid})` : "stopped";
+    console.log(`  ${orchIcon} orchestrator: ${orchText}`);
+    if (!orchStatus.running) allDaemonsRunning = false;
+
+    if (!allDaemonsRunning) {
+      console.log(`\n  ⚠️  Some daemons are not running. Run "whs start" to restart them.`);
+    }
+
     // Verbose output
     if (options.verbose) {
-      console.log(`\n  State file: ${getStatePath()}`);
+      console.log(`\n📁 Paths\n`);
+      console.log(`  Config: ${getConfigPath()}`);
+      console.log(`  State: ${getStatePath()}`);
+      console.log(`  Orchestrator: ${config.orchestratorPath}`);
       console.log(`  Last updated: ${state.lastUpdated.toISOString()}`);
 
       if (state.activeWork.size > 0) {
-        console.log("\n  Active Work:");
+        console.log("\n📋 Active Work\n");
         for (const [id, work] of state.activeWork) {
           const elapsed = Math.floor((Date.now() - work.startedAt.getTime()) / 60000);
-          console.log(`    ${id} (${work.workItem.project})`);
-          console.log(`      Agent: ${work.agent}`);
-          console.log(`      Duration: ${elapsed} min`);
-          console.log(`      Cost: $${work.costSoFar.toFixed(4)}`);
+          console.log(`  ${id} (${work.workItem.project})`);
+          console.log(`    Agent: ${work.agent}`);
+          console.log(`    Duration: ${elapsed} min`);
+          console.log(`    Cost: $${work.costSoFar.toFixed(4)}`);
         }
       }
 
       if (state.pendingQuestions.size > 0) {
-        console.log("\n  Pending Questions:");
+        console.log("\n❓ Pending Questions\n");
         for (const [id, question] of state.pendingQuestions) {
-          console.log(`    ${id} (${question.project})`);
-          console.log(`      Work item: ${question.workItemId}`);
-          console.log(`      Question: ${question.questions[0]?.question || "N/A"}`);
-          console.log(`      Asked: ${question.askedAt.toISOString()}`);
+          console.log(`  ${id} (${question.project})`);
+          console.log(`    Work item: ${question.workItemId}`);
+          console.log(`    Question: ${question.questions[0]?.question || "N/A"}`);
+          console.log(`    Asked: ${question.askedAt.toISOString()}`);
         }
       }
     }
