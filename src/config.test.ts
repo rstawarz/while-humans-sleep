@@ -13,15 +13,33 @@ import {
 import type { Config, Project } from "./types.js";
 
 // Test getConfigDir and getConfigPath
+// Note: These functions now search for .whs/ in the directory tree
+// They will throw if not in a WHS orchestrator
 describe("config paths", () => {
-  it("getConfigDir returns path under home directory", () => {
-    const configDir = getConfigDir();
+  const TEST_DIR = join(tmpdir(), `whs-paths-test-${process.pid}-${Date.now()}`);
+
+  beforeEach(() => {
+    if (!existsSync(TEST_DIR)) {
+      mkdirSync(TEST_DIR, { recursive: true });
+    }
+    // Initialize WHS in test directory
+    initializeWhs(TEST_DIR);
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("getConfigDir returns .whs path when in orchestrator", () => {
+    const configDir = getConfigDir(TEST_DIR);
     expect(configDir).toContain(".whs");
-    expect(configDir).toContain(homedir());
+    expect(configDir).toBe(join(TEST_DIR, ".whs"));
   });
 
   it("getConfigPath returns path to config.json", () => {
-    const configPath = getConfigPath();
+    const configPath = getConfigPath(TEST_DIR);
     expect(configPath).toContain("config.json");
     expect(configPath).toContain(".whs");
   });
@@ -433,11 +451,11 @@ describe("config functions with temp directory", () => {
 // ============================================================
 
 describe("getDefaultOrchestratorPath", () => {
-  it("returns path under home directory", () => {
+  it("returns current working directory", () => {
     const defaultPath = getDefaultOrchestratorPath();
 
-    expect(defaultPath).toContain(homedir());
-    expect(defaultPath).toContain("whs-orchestrator");
+    // Now defaults to current directory since WHS is project-based
+    expect(defaultPath).toBe(process.cwd());
   });
 
   it("returns consistent value", () => {

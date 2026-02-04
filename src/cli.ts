@@ -12,7 +12,6 @@ import { Dispatcher } from "./dispatcher.js";
 import { CLINotifier } from "./notifiers/cli.js";
 import {
   loadConfig,
-  saveConfig,
   addProject,
   removeProject,
   getProject,
@@ -21,8 +20,9 @@ import {
   getConfigDir,
   expandPath,
   isInitialized,
+  isInitializedInDir,
   initializeWhs,
-  getDefaultOrchestratorPath,
+  findConfigDir,
 } from "./config.js";
 import { beads } from "./beads/index.js";
 import {
@@ -42,49 +42,70 @@ program
   .description("While Humans Sleep - Multi-project AI agent dispatcher")
   .version("0.1.0");
 
+/**
+ * Checks if WHS is initialized and shows an error if not.
+ * Returns true if initialized, false otherwise (and prints error).
+ */
+function requireOrchestrator(): boolean {
+  if (!isInitialized()) {
+    console.error("Error: Not in a WHS orchestrator.");
+    console.error("");
+    console.error("Either:");
+    console.error("  1. cd to your WHS orchestrator directory, OR");
+    console.error("  2. Run 'whs init' in a directory to create a new orchestrator");
+    return false;
+  }
+  return true;
+}
+
 program
   .command("init")
-  .description("Initialize WHS (run once before adding projects)")
-  .option("-o, --orchestrator <path>", "Orchestrator beads location", getDefaultOrchestratorPath())
+  .description("Initialize WHS in the current directory as an orchestrator")
   .option("-p, --prefix <prefix>", "Bead ID prefix for orchestrator", "orc")
   .action(async (options) => {
-    // Check if already initialized
-    if (isInitialized()) {
-      console.log("WHS is already initialized.");
+    const orchestratorPath = process.cwd();
+
+    // Check if already initialized in this exact directory
+    if (isInitializedInDir(orchestratorPath)) {
+      console.log("WHS is already initialized in this directory.");
       console.log(`  Config: ${getConfigPath()}`);
       const config = loadConfig();
       console.log(`  Orchestrator: ${config.orchestratorPath}`);
       console.log("");
-      console.log("Use `whs add <name> <path>` to add projects.");
+      console.log("Use `whs add <path>` to add projects.");
       return;
     }
 
-    const orchestratorPath = expandPath(options.orchestrator);
-
-    console.log("🌙 Initializing While Humans Sleep\n");
-    console.log(`  Config directory: ${getConfigDir()}`);
-    console.log(`  Orchestrator: ${orchestratorPath}`);
-    console.log("");
-
-    // 1. Initialize config
-    console.log("Creating config...");
-    const config = initializeWhs(orchestratorPath);
-    console.log(`  Created ${getConfigPath()}`);
-
-    // 2. Create orchestrator directory
-    if (!existsSync(orchestratorPath)) {
-      console.log("Creating orchestrator directory...");
-      mkdirSync(orchestratorPath, { recursive: true });
+    // Check if there's already a WHS orchestrator in a parent directory
+    const existingConfigDir = findConfigDir(orchestratorPath);
+    if (existingConfigDir) {
+      console.log("A WHS orchestrator already exists in a parent directory:");
+      console.log(`  ${existingConfigDir}`);
+      console.log("");
+      console.log("You can either:");
+      console.log("  - Use the existing orchestrator from this directory");
+      console.log("  - Move to a different location to create a new orchestrator");
+      return;
     }
 
-    // 3. Initialize git repo
+    console.log("🌙 Initializing While Humans Sleep\n");
+    console.log(`  Orchestrator: ${orchestratorPath}`);
+    console.log(`  Config: ${orchestratorPath}/.whs/config.json`);
+    console.log("");
+
+    // 1. Initialize git repo if not present
     const gitDir = resolve(orchestratorPath, ".git");
     if (!existsSync(gitDir)) {
       console.log("Initializing git repository...");
       execSync("git init", { cwd: orchestratorPath, stdio: "pipe" });
     }
 
-    // 4. Initialize beads with custom prefix
+    // 2. Initialize config (creates .whs/config.json)
+    console.log("Creating config...");
+    initializeWhs(orchestratorPath);
+    console.log(`  Created .whs/config.json`);
+
+    // 3. Initialize beads with custom prefix
     if (!beads.isInitialized(orchestratorPath)) {
       console.log("Initializing beads...");
       beads.init(orchestratorPath, { prefix: options.prefix });
@@ -98,7 +119,7 @@ program
       }
     }
 
-    // 5. Configure sync-branch and start daemon
+    // 4. Configure sync-branch and start daemon
     console.log("Starting beads daemon...");
     try {
       beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
@@ -110,7 +131,7 @@ program
 
     console.log("\n✅ WHS initialized successfully!\n");
     console.log("Next steps:");
-    console.log("  1. Add a project:  whs add myproject ~/work/myproject");
+    console.log("  1. Add a project:  whs add ~/work/myproject");
     console.log("  2. Create tasks:   bd create \"Task title\" (in project dir)");
     console.log("  3. Start working:  whs start");
   });
@@ -119,10 +140,7 @@ program
   .command("start")
   .description("Start the dispatcher")
   .action(async () => {
-    // Check if WHS is initialized
-    if (!isInitialized()) {
-      console.error("Error: WHS is not initialized.");
-      console.error("Run `whs init` first to set up the orchestrator.");
+    if (!requireOrchestrator()) {
       process.exit(1);
     }
 
@@ -172,10 +190,7 @@ program
   .command("restart")
   .description("Gracefully restart the dispatcher (wait for agents, then restart)")
   .action(async () => {
-    // Check if WHS is initialized
-    if (!isInitialized()) {
-      console.error("Error: WHS is not initialized.");
-      console.error("Run `whs init` first to set up the orchestrator.");
+    if (!requireOrchestrator()) {
       process.exit(1);
     }
 
@@ -312,10 +327,7 @@ program
   .option("-s, --stealth", "Use beads stealth mode (local only)")
   .option("-a, --agents-path <path>", "Path to agent definitions")
   .action(async (inputPath, options) => {
-    // Check if WHS is initialized
-    if (!isInitialized()) {
-      console.error("Error: WHS is not initialized.");
-      console.error("Run `whs init` first to set up the orchestrator.");
+    if (!requireOrchestrator()) {
       process.exit(1);
     }
 
@@ -683,10 +695,7 @@ program
   .command("answer <questionId> <answer>")
   .description("Answer a pending question")
   .action(async (questionId, answer) => {
-    // Check if WHS is initialized
-    if (!isInitialized()) {
-      console.error("Error: WHS is not initialized.");
-      console.error("Run `whs init` first.");
+    if (!requireOrchestrator()) {
       process.exit(1);
     }
 
@@ -785,10 +794,7 @@ program
   .command("questions")
   .description("List pending questions")
   .action(() => {
-    // Check if WHS is initialized
-    if (!isInitialized()) {
-      console.error("Error: WHS is not initialized.");
-      console.error("Run `whs init` first.");
+    if (!requireOrchestrator()) {
       process.exit(1);
     }
 

@@ -25,5 +25,9 @@ logs/
 # Test coverage
 coverage/
 
-# Local state (not the global ~/.nec/)
+# Integration test fixtures (runtime files)
+test/integration/fixtures/*
+!test/integration/fixtures/.gitignore
+
+# Local state
 .nec-local/

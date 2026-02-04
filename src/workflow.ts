@@ -212,13 +212,17 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
       type: "task",
     });
 
-    return readyBeads.map((bead) => ({
-      id: bead.id,
-      epicId: bead.parent || "",
-      agent: extractAgentFromBead(bead),
-      context: bead.description || "",
-      status: bead.status as "open" | "in_progress" | "closed",
-    }));
+    // Filter to only open steps - bd ready returns both open and in_progress
+    // We only want steps that haven't been started yet
+    return readyBeads
+      .filter((bead) => bead.status === "open")
+      .map((bead) => ({
+        id: bead.id,
+        epicId: bead.parent || "",
+        agent: extractAgentFromBead(bead),
+        context: bead.description || "",
+        status: bead.status as "open" | "in_progress" | "closed",
+      }));
   } catch {
     return [];
   }

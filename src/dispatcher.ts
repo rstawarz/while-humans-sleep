@@ -750,8 +750,10 @@ export class Dispatcher {
     const orchestratorPath = expandPath(this.config.orchestratorPath);
 
     // Get the question bead
+    // Questions are stored as tasks with "whs:question" label
     const questionBead = beads.show(questionId, orchestratorPath);
-    if (!questionBead || questionBead.type !== "question" || questionBead.status !== "open") {
+    const isQuestion = questionBead?.labels?.includes("whs:question");
+    if (!questionBead || !isQuestion || questionBead.status !== "open") {
       throw new Error(`Question not found or already answered: ${questionId}`);
     }
 

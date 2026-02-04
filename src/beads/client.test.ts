@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execSync } from "child_process";
 import { BeadsClient } from "./client.js";
-import type { Bead } from "./types.js";
+import type { Bead, RawBead } from "./types.js";
 
 // Mock child_process
 vi.mock("child_process", () => ({
@@ -27,7 +27,21 @@ describe("BeadsClient", () => {
     vi.resetAllMocks();
   });
 
-  // Sample bead for testing
+  // Sample raw bead (as returned by bd CLI) for testing
+  const sampleRawBead: RawBead = {
+    id: "bd-a1b2",
+    title: "Implement auth",
+    description: "Add JWT authentication",
+    issue_type: "task", // CLI returns issue_type, not type
+    status: "open",
+    priority: 1,
+    labels: ["backend"],
+    dependencies: [],
+    created_at: "2024-01-15T10:00:00Z",
+    updated_at: "2024-01-15T10:00:00Z",
+  };
+
+  // Expected normalized bead
   const sampleBead: Bead = {
     id: "bd-a1b2",
     title: "Implement auth",
@@ -43,7 +57,7 @@ describe("BeadsClient", () => {
 
   describe("ready", () => {
     it("returns ready tasks as array", () => {
-      mockExecSync.mockReturnValue(JSON.stringify([sampleBead]));
+      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.ready(testCwd);
 
@@ -98,7 +112,7 @@ describe("BeadsClient", () => {
 
   describe("show", () => {
     it("returns bead by id", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleBead));
+      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.show("bd-a1b2", testCwd);
 
@@ -122,7 +136,7 @@ describe("BeadsClient", () => {
 
   describe("list", () => {
     it("lists all beads without filters", () => {
-      mockExecSync.mockReturnValue(JSON.stringify([sampleBead]));
+      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.list(testCwd);
 
@@ -165,7 +179,7 @@ describe("BeadsClient", () => {
       });
 
       expect(mockExecSync).toHaveBeenCalledWith(
-        "bd list --label-any urgent,critical --label-all backend --label-none wontfix --json",
+        "bd list --label-any urgent,critical --label backend --label-none wontfix --json",
         expect.any(Object)
       );
     });
@@ -173,7 +187,8 @@ describe("BeadsClient", () => {
 
   describe("create", () => {
     it("creates bead with title only", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleBead));
+      // bd create returns a single object, not an array
+      mockExecSync.mockReturnValue(JSON.stringify(sampleRawBead));
 
       const result = client.create("Implement auth", testCwd);
 
@@ -185,9 +200,13 @@ describe("BeadsClient", () => {
     });
 
     it("creates bead with all options", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleBead));
+      const beadWithLabels = { ...sampleRawBead, labels: ["backend", "urgent"] };
+      // First call is create, second call is show (to fetch labels)
+      mockExecSync
+        .mockReturnValueOnce(JSON.stringify(sampleRawBead))
+        .mockReturnValueOnce(JSON.stringify([beadWithLabels]));
 
-      client.create("Implement auth", testCwd, {
+      const result = client.create("Implement auth", testCwd, {
         type: "task",
         priority: 1,
         parent: "bd-epic1",
@@ -201,16 +220,22 @@ describe("BeadsClient", () => {
         'bd create "Implement auth" -t task -p 1 --parent bd-epic1 --label backend --label urgent --description "Add JWT authentication" --json',
         expect.any(Object)
       );
+      // When labels are provided, we fetch the full bead to get labels in the response
+      expect(mockExecSync).toHaveBeenCalledWith(
+        `bd show ${sampleRawBead.id} --json`,
+        expect.any(Object)
+      );
+      expect(result.labels).toEqual(["backend", "urgent"]);
     });
 
     it("creates bead with non-open status by calling update after create", () => {
-      const createdBead = { ...sampleBead, status: "open" };
-      const updatedBead = { ...sampleBead, status: "blocked" };
+      const createdRawBead = { ...sampleRawBead, status: "open" };
+      const updatedRawBead = { ...sampleRawBead, status: "blocked" };
 
-      // First call returns created bead, second call returns updated bead (as array per bd update behavior)
+      // First call returns created bead (single object), second call returns updated bead (as array per bd update behavior)
       mockExecSync
-        .mockReturnValueOnce(JSON.stringify(createdBead))
-        .mockReturnValueOnce(JSON.stringify([updatedBead]));
+        .mockReturnValueOnce(JSON.stringify(createdRawBead))
+        .mockReturnValueOnce(JSON.stringify([updatedRawBead]));
 
       const result = client.create("Blocked task", testCwd, {
         status: "blocked",
@@ -232,7 +257,7 @@ describe("BeadsClient", () => {
     });
 
     it("escapes quotes in title", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleBead));
+      mockExecSync.mockReturnValue(JSON.stringify(sampleRawBead));
 
       client.create('Fix "critical" bug', testCwd);
 
@@ -260,15 +285,16 @@ describe("BeadsClient", () => {
 
     it("adds and removes labels", () => {
       // bd update returns an array of updated beads
-      mockExecSync.mockReturnValue(JSON.stringify([sampleBead]));
+      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       client.update("bd-a1b2", testCwd, {
         labelAdd: ["needs-review"],
         labelRemove: ["wip"],
       });
 
+      // Note: beads CLI uses --add-label and --remove-label, not --label-add/--label-remove
       expect(mockExecSync).toHaveBeenCalledWith(
-        "bd update bd-a1b2 --label-add needs-review --label-remove wip --json",
+        "bd update bd-a1b2 --add-label needs-review --remove-label wip --json",
         expect.any(Object)
       );
     });
@@ -276,8 +302,9 @@ describe("BeadsClient", () => {
 
   describe("close", () => {
     it("closes bead with reason", () => {
-      const closedBead = { ...sampleBead, status: "closed" as const };
-      mockExecSync.mockReturnValue(JSON.stringify(closedBead));
+      // bd close returns array format
+      const closedRawBead = { ...sampleRawBead, status: "closed" };
+      mockExecSync.mockReturnValue(JSON.stringify([closedRawBead]));
 
       const result = client.close("bd-a1b2", "PR #47 merged", testCwd);
 

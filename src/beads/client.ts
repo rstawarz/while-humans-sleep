@@ -6,7 +6,8 @@
  */
 
 import { execSync, type ExecSyncOptions } from "child_process";
-import type { Bead, BeadCreateOptions, BeadUpdateOptions, BeadListOptions } from "./types.js";
+import type { Bead, BeadCreateOptions, BeadUpdateOptions, BeadListOptions, RawBead } from "./types.js";
+import { normalizeBead } from "./types.js";
 
 export class BeadsClient {
   /**
@@ -62,14 +63,17 @@ export class BeadsClient {
     if (options?.priorityMax !== undefined) args.push("--priority-max", String(options.priorityMax));
     if (options?.labelNone?.length) args.push("--label-none", options.labelNone.join(","));
 
-    return this.exec(args, cwd) as Bead[];
+    const raw = this.exec(args, cwd) as RawBead[];
+    return raw.map(normalizeBead);
   }
 
   /**
    * Get a specific bead by ID
    */
   show(id: string, cwd: string): Bead {
-    return this.exec(["show", id], cwd) as Bead;
+    // bd show returns an array with one element
+    const raw = this.exec(["show", id], cwd) as RawBead[];
+    return normalizeBead(raw[0]);
   }
 
   /**
@@ -85,10 +89,12 @@ export class BeadsClient {
     if (options?.priorityMin !== undefined) args.push("--priority-min", String(options.priorityMin));
     if (options?.priorityMax !== undefined) args.push("--priority-max", String(options.priorityMax));
     if (options?.labelAny?.length) args.push("--label-any", options.labelAny.join(","));
-    if (options?.labelAll?.length) args.push("--label-all", options.labelAll.join(","));
+    // --label (or -l) is the AND filter in beads CLI
+    if (options?.labelAll?.length) args.push("--label", options.labelAll.join(","));
     if (options?.labelNone?.length) args.push("--label-none", options.labelNone.join(","));
 
-    return this.exec(args, cwd) as Bead[];
+    const raw = this.exec(args, cwd) as RawBead[];
+    return raw.map(normalizeBead);
   }
 
   /**
@@ -110,14 +116,20 @@ export class BeadsClient {
       args.push("--description", `"${this.escapeQuotes(options.description)}"`);
     }
 
-    const bead = this.exec(args, cwd) as Bead;
+    const raw = this.exec(args, cwd) as RawBead;
 
-    // If a non-open status was requested, update the bead after creation
+    // bd create doesn't return labels in JSON output, so fetch the full bead
+    // Also handles non-open status via update if needed
     if (options?.status && options.status !== "open") {
-      return this.update(bead.id, cwd, { status: options.status });
+      return this.update(raw.id, cwd, { status: options.status });
     }
 
-    return bead;
+    // If labels were set, fetch the bead to get the complete data
+    if (options?.labels?.length) {
+      return this.show(raw.id, cwd);
+    }
+
+    return normalizeBead(raw);
   }
 
   /**
@@ -125,7 +137,6 @@ export class BeadsClient {
    */
   update(id: string, cwd: string, options: BeadUpdateOptions): Bead {
     const args = ["update", id];
-    // Note: bd update returns an array, we extract the first element
 
     if (options.title) args.push("--title", `"${this.escapeQuotes(options.title)}"`);
     if (options.description) args.push("--description", `"${this.escapeQuotes(options.description)}"`);
@@ -133,25 +144,26 @@ export class BeadsClient {
     if (options.status) args.push("--status", options.status);
     if (options.labelAdd?.length) {
       for (const label of options.labelAdd) {
-        args.push("--label-add", label);
+        args.push("--add-label", label);
       }
     }
     if (options.labelRemove?.length) {
       for (const label of options.labelRemove) {
-        args.push("--label-remove", label);
+        args.push("--remove-label", label);
       }
     }
 
     // bd update returns an array, extract first element
-    const result = this.exec(args, cwd) as Bead[];
-    return result[0];
+    const raw = this.exec(args, cwd) as RawBead[];
+    return normalizeBead(raw[0]);
   }
 
   /**
    * Close a bead with a reason
    */
   close(id: string, reason: string, cwd: string): Bead {
-    return this.exec(["close", id, "--reason", `"${this.escapeQuotes(reason)}"`], cwd) as Bead;
+    const raw = this.exec(["close", id, "--reason", `"${this.escapeQuotes(reason)}"`], cwd) as RawBead[];
+    return normalizeBead(raw[0]);
   }
 
   /**
@@ -315,6 +327,9 @@ export class BeadsClient {
   /**
    * Create a question bead that blocks a workflow step
    *
+   * Questions are stored as tasks with the "whs:question" label since
+   * beads CLI doesn't have a native "question" type.
+   *
    * @param title - Question title (e.g., "Question: Which epic?")
    * @param cwd - Orchestrator path
    * @param data - Structured question data (stored as JSON in description)
@@ -328,11 +343,12 @@ export class BeadsClient {
     parentEpicId: string,
     blocksStepId: string
   ): Bead {
-    // Create question bead
+    // Create question bead as a task with special label
     const question = this.create(title, cwd, {
-      type: "question",
+      type: "task", // Use task type since "question" is not a valid bd type
       parent: parentEpicId,
       description: JSON.stringify(data, null, 2),
+      labels: ["whs:question"], // Mark as a question
     });
 
     // Add dependency: question blocks the step
@@ -343,9 +359,11 @@ export class BeadsClient {
 
   /**
    * List pending (open) questions in the orchestrator
+   *
+   * Questions are identified by the "whs:question" label.
    */
   listPendingQuestions(cwd: string): Bead[] {
-    return this.list(cwd, { type: "question", status: "open" });
+    return this.list(cwd, { status: "open", labelAll: ["whs:question"] });
   }
 
   /**

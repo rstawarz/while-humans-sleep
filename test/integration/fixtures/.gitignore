@@ -1,0 +1,4 @@
+# Ignore all runtime test files
+*
+# But keep this .gitignore
+!.gitignore

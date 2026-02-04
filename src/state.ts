@@ -1,15 +1,16 @@
 /**
  * State Persistence - Crash recovery support
  *
- * Manages ~/.whs/state.json for tracking active work.
+ * Manages .whs/state.json for tracking active work.
  * State is saved after every significant change to enable crash recovery.
+ * The .whs/ folder lives in the orchestrator directory.
  *
  * Note: Questions are now tracked as beads in the orchestrator, not in state.
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
-import { ensureConfigDir, getConfigDir } from "./config.js";
+import { getConfigDir, findConfigDir } from "./config.js";
 import type { ActiveWork } from "./types.js";
 
 const STATE_FILE = "state.json";
@@ -52,9 +53,11 @@ const CURRENT_VERSION = 2; // Bumped from 1 - questions moved to beads
 
 /**
  * Gets the path to the state file
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function getStatePath(): string {
-  return join(getConfigDir(), STATE_FILE);
+export function getStatePath(startDir?: string): string {
+  return join(getConfigDir(startDir), STATE_FILE);
 }
 
 /**
@@ -89,12 +92,14 @@ function deserializeActiveWork(data: SerializedActiveWork): ActiveWork {
 }
 
 /**
- * Loads state from ~/.whs/state.json
+ * Loads state from .whs/state.json
  * Returns empty state if file doesn't exist or is invalid
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function loadState(): DispatcherState {
-  ensureConfigDir();
-  const statePath = getStatePath();
+export function loadState(startDir?: string): DispatcherState {
+  // State requires config to exist - getConfigDir will throw if not
+  const statePath = getStatePath(startDir);
 
   if (!existsSync(statePath)) {
     return createEmptyState();
@@ -132,11 +137,13 @@ export function loadState(): DispatcherState {
 }
 
 /**
- * Saves state to ~/.whs/state.json
+ * Saves state to .whs/state.json
+ *
+ * @param state - Dispatcher state to save
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function saveState(state: DispatcherState): void {
-  ensureConfigDir();
-  const statePath = getStatePath();
+export function saveState(state: DispatcherState, startDir?: string): void {
+  const statePath = getStatePath(startDir);
 
   // Serialize Maps to Records
   const activeWork: Record<string, SerializedActiveWork> = {};
@@ -275,9 +282,11 @@ export function getStateSummary(state: DispatcherState): {
 
 /**
  * Gets the path to the lock file
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function getLockPath(): string {
-  return join(getConfigDir(), LOCK_FILE);
+export function getLockPath(startDir?: string): string {
+  return join(getConfigDir(startDir), LOCK_FILE);
 }
 
 /**
@@ -291,10 +300,12 @@ interface LockInfo {
 /**
  * Attempts to acquire the dispatcher lock.
  * Returns true if lock acquired, false if another dispatcher is running.
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function acquireLock(): boolean {
-  ensureConfigDir();
-  const lockPath = getLockPath();
+export function acquireLock(startDir?: string): boolean {
+  // Lock requires config to exist - getLockPath will throw if not in orchestrator
+  const lockPath = getLockPath(startDir);
 
   // Check if lock exists
   if (existsSync(lockPath)) {
@@ -328,9 +339,14 @@ export function acquireLock(): boolean {
 
 /**
  * Releases the dispatcher lock
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function releaseLock(): void {
-  const lockPath = getLockPath();
+export function releaseLock(startDir?: string): void {
+  // Try to get the lock path, but don't fail if we're not in an orchestrator
+  const configDir = findConfigDir(startDir);
+  if (!configDir) return;
+  const lockPath = join(configDir, LOCK_FILE);
   if (existsSync(lockPath)) {
     try {
       unlinkSync(lockPath);
@@ -342,9 +358,14 @@ export function releaseLock(): void {
 
 /**
  * Gets info about the current lock holder (if any)
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
  */
-export function getLockInfo(): LockInfo | null {
-  const lockPath = getLockPath();
+export function getLockInfo(startDir?: string): LockInfo | null {
+  // Try to get the lock path, but don't fail if we're not in an orchestrator
+  const configDir = findConfigDir(startDir);
+  if (!configDir) return null;
+  const lockPath = join(configDir, LOCK_FILE);
   if (!existsSync(lockPath)) {
     return null;
   }
