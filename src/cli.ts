@@ -144,13 +144,16 @@ program
     const notifier = new CLINotifier();
     const dispatcher = new Dispatcher(config, notifier);
 
-    // Handle graceful shutdown (Ctrl+C)
-    // First Ctrl+C: graceful shutdown (wait for agents)
-    // Second Ctrl+C: force stop
-    process.on("SIGINT", async () => {
+    // Handle graceful shutdown (Ctrl+C or kill)
+    // First signal: graceful shutdown (wait for agents)
+    // Second signal: force stop
+    const handleShutdown = async () => {
       await dispatcher.requestShutdown();
       process.exit(0);
-    });
+    };
+
+    process.on("SIGINT", handleShutdown);  // Ctrl+C
+    process.on("SIGTERM", handleShutdown); // kill (default signal)
 
     await dispatcher.start();
   });
@@ -228,6 +231,65 @@ program
     child.on("exit", (code) => {
       process.exit(code ?? 0);
     });
+  });
+
+program
+  .command("stop")
+  .description("Stop the dispatcher gracefully")
+  .option("-f, --force", "Force immediate stop (may lose agent work)")
+  .action(async (options) => {
+    const lockInfo = getLockInfo();
+    if (!lockInfo) {
+      console.log("No dispatcher is running.");
+      return;
+    }
+
+    console.log(`Stopping dispatcher (PID ${lockInfo.pid})...`);
+
+    const signal = options.force ? "SIGKILL" : "SIGTERM";
+    if (options.force) {
+      console.log("  Using force stop (SIGKILL)");
+    } else {
+      console.log("  Using graceful shutdown (waiting for agents)");
+    }
+
+    try {
+      process.kill(lockInfo.pid, signal);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") {
+        console.log("  Process already exited (stale lock file).");
+        return;
+      }
+      console.error(`  Failed to signal process: ${err}`);
+      process.exit(1);
+    }
+
+    if (options.force) {
+      console.log("  Dispatcher killed.");
+      return;
+    }
+
+    // Wait for graceful shutdown
+    console.log("  Waiting for shutdown...");
+    let attempts = 0;
+    const maxAttempts = 120; // 2 minutes max
+    while (attempts < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        process.kill(lockInfo.pid, 0); // Check if still running
+        attempts++;
+        if (attempts % 10 === 0) {
+          console.log(`  Still waiting... (${attempts}s)`);
+        }
+      } catch {
+        // Process exited
+        console.log("  Dispatcher stopped.");
+        return;
+      }
+    }
+
+    console.log("  Timeout. Use --force to kill immediately.");
+    process.exit(1);
   });
 
 program
@@ -491,14 +553,17 @@ program
     const config = loadConfig();
     const state = loadState();
     const summary = getStateSummary(state);
+    const lockInfo = getLockInfo();
 
     console.log("📊 Dispatcher Status\n");
 
-    // Paused state
-    if (summary.paused) {
-      console.log("  Status: PAUSED");
+    // Check if dispatcher is actually running
+    if (!lockInfo) {
+      console.log("  Status: Stopped");
+    } else if (summary.paused) {
+      console.log(`  Status: PAUSED (PID ${lockInfo.pid})`);
     } else {
-      console.log("  Status: Running");
+      console.log(`  Status: Running (PID ${lockInfo.pid})`);
     }
 
     // Active work
