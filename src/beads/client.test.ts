@@ -367,4 +367,210 @@ describe("BeadsClient", () => {
       );
     });
   });
+
+  // ============================================================
+  // Configuration Tests
+  // ============================================================
+
+  describe("configSet", () => {
+    it("sets a config value", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.configSet("sync.branch", "beads-sync", testCwd);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd config set sync.branch beads-sync",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+  });
+
+  describe("configGet", () => {
+    it("returns config value when set", () => {
+      mockExecSync.mockReturnValue("beads-sync");
+
+      const result = client.configGet("sync.branch", testCwd);
+
+      expect(result).toBe("beads-sync");
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd config get sync.branch",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+
+    it("returns null when config not set", () => {
+      mockExecSync.mockImplementation(() => {
+        throw new Error("config key not found");
+      });
+
+      const result = client.configGet("nonexistent.key", testCwd);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  // ============================================================
+  // Daemon Management Tests
+  // ============================================================
+
+  describe("daemonStart", () => {
+    it("starts daemon without options", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.daemonStart(testCwd);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd daemon start",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+
+    it("starts daemon with auto-commit", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.daemonStart(testCwd, { autoCommit: true });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd daemon start --auto-commit",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+  });
+
+  describe("daemonStop", () => {
+    it("stops daemon", () => {
+      mockExecSync.mockReturnValue("");
+
+      client.daemonStop(testCwd);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd daemon stop",
+        expect.objectContaining({ cwd: testCwd })
+      );
+    });
+
+    it("ignores errors when daemon not running", () => {
+      mockExecSync.mockImplementation(() => {
+        throw new Error("daemon not running");
+      });
+
+      // Should not throw
+      expect(() => client.daemonStop(testCwd)).not.toThrow();
+    });
+  });
+
+  describe("daemonStatus", () => {
+    it("returns running status with PID", () => {
+      mockExecSync.mockReturnValue("✓ running (PID 12345, v0.49.3)");
+
+      const result = client.daemonStatus(testCwd);
+
+      expect(result.running).toBe(true);
+      expect(result.pid).toBe(12345);
+    });
+
+    it("returns not running when stopped", () => {
+      mockExecSync.mockReturnValue("✗ stopped");
+
+      const result = client.daemonStatus(testCwd);
+
+      expect(result.running).toBe(false);
+      expect(result.pid).toBeUndefined();
+    });
+
+    it("returns not running on error", () => {
+      mockExecSync.mockImplementation(() => {
+        throw new Error("command failed");
+      });
+
+      const result = client.daemonStatus(testCwd);
+
+      expect(result.running).toBe(false);
+    });
+  });
+
+  describe("isDaemonRunning", () => {
+    it("returns true when daemon running", () => {
+      mockExecSync.mockReturnValue("✓ running (PID 12345)");
+
+      expect(client.isDaemonRunning(testCwd)).toBe(true);
+    });
+
+    it("returns false when daemon stopped", () => {
+      mockExecSync.mockReturnValue("✗ stopped");
+
+      expect(client.isDaemonRunning(testCwd)).toBe(false);
+    });
+  });
+
+  describe("ensureDaemonWithSyncBranch", () => {
+    it("configures sync branch and starts daemon when not running", () => {
+      // First call: configGet returns null (not set)
+      // Second call: daemonStatus returns stopped
+      // Then: configSet, daemonStart
+      let callCount = 0;
+      mockExecSync.mockImplementation((cmd: string) => {
+        callCount++;
+        if (cmd.includes("config get")) {
+          throw new Error("not set");
+        }
+        if (cmd.includes("daemon status")) {
+          return "✗ stopped";
+        }
+        return "";
+      });
+
+      client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
+
+      // Should have called configSet and daemonStart
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd config set sync.branch beads-sync",
+        expect.anything()
+      );
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd daemon start --auto-commit",
+        expect.anything()
+      );
+    });
+
+    it("skips configSet if sync branch already configured", () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes("config get")) {
+          return "beads-sync";
+        }
+        if (cmd.includes("daemon status")) {
+          return "✗ stopped";
+        }
+        return "";
+      });
+
+      client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
+
+      // Should NOT have called configSet
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("config set"),
+        expect.anything()
+      );
+    });
+
+    it("skips daemonStart if already running", () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes("config get")) {
+          return "beads-sync";
+        }
+        if (cmd.includes("daemon status")) {
+          return "✓ running (PID 12345)";
+        }
+        return "";
+      });
+
+      client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
+
+      // Should NOT have called daemonStart
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("daemon start"),
+        expect.anything()
+      );
+    });
+  });
 });
