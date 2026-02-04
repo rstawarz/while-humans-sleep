@@ -645,13 +645,14 @@ program
       console.log(`  Status: ${epic.status}`);
 
       // Create planning task under the epic (open status)
+      // Use type "task" with label "planning" since beads doesn't have a planning type
       const planningTask = beads.create(`Plan: ${description}`, projectPath, {
-        type: "planning",
+        type: "task",
         status: "open",
         priority,
         parent: epic.id,
         description: `Planning task for: ${description}\n\nThis task will be picked up by the dispatcher to run the planner agent.\nThe planner will:\n1. Analyze the codebase\n2. Ask clarifying questions\n3. Create implementation subtasks\n4. Present a plan for approval`,
-        labels: ["whs", "agent:planner"],
+        labels: ["whs", "planning", "agent:planner"],
       });
 
       console.log(`\nCreated planning task: ${planningTask.id}`);

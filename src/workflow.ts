@@ -339,17 +339,25 @@ function parseEpicLabels(labels: string[]): {
 }
 
 /**
- * Determines the first agent based on work item type
+ * Determines the first agent based on work item type and labels
+ *
+ * Planning tasks are identified by the "planning" label rather than type,
+ * since beads doesn't have a native "planning" type.
  */
 export function getFirstAgent(workItem: WorkItem): string {
+  // Check for planning label first (takes precedence over type)
+  if (workItem.labels?.includes("planning")) {
+    return "planner";
+  }
+
   switch (workItem.type) {
-    case "planning":
-      return "planner";
     case "bug":
       return "implementation";
     case "epic":
       return "planner";
     case "task":
+    case "feature":
+    case "chore":
     default:
       return "implementation";
   }

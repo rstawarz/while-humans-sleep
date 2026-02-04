@@ -207,10 +207,10 @@ describe("BeadsClient", () => {
       const createdBead = { ...sampleBead, status: "open" };
       const updatedBead = { ...sampleBead, status: "blocked" };
 
-      // First call returns created bead, second call returns updated bead
+      // First call returns created bead, second call returns updated bead (as array per bd update behavior)
       mockExecSync
         .mockReturnValueOnce(JSON.stringify(createdBead))
-        .mockReturnValueOnce(JSON.stringify(updatedBead));
+        .mockReturnValueOnce(JSON.stringify([updatedBead]));
 
       const result = client.create("Blocked task", testCwd, {
         status: "blocked",
@@ -246,7 +246,8 @@ describe("BeadsClient", () => {
   describe("update", () => {
     it("updates bead with new status", () => {
       const updatedBead = { ...sampleBead, status: "in_progress" as const };
-      mockExecSync.mockReturnValue(JSON.stringify(updatedBead));
+      // bd update returns an array of updated beads
+      mockExecSync.mockReturnValue(JSON.stringify([updatedBead]));
 
       const result = client.update("bd-a1b2", testCwd, { status: "in_progress" });
 
@@ -258,7 +259,8 @@ describe("BeadsClient", () => {
     });
 
     it("adds and removes labels", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleBead));
+      // bd update returns an array of updated beads
+      mockExecSync.mockReturnValue(JSON.stringify([sampleBead]));
 
       client.update("bd-a1b2", testCwd, {
         labelAdd: ["needs-review"],

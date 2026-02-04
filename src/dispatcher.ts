@@ -318,6 +318,7 @@ export class Dispatcher {
         priority: 2,
         type: "task" as const,
         status: step.status,
+        labels: [],
         dependencies: [],
       }));
     } catch (err) {
@@ -375,6 +376,7 @@ export class Dispatcher {
       priority: bead.priority ?? 2,
       type: (bead.type as WorkItem["type"]) || "task",
       status: bead.status as WorkItem["status"],
+      labels: bead.labels || [],
       dependencies: bead.dependencies || [],
     };
   }
@@ -750,6 +752,7 @@ export class Dispatcher {
           priority: 2,
           type: "task",
           status: "in_progress",
+          labels: [],
           dependencies: [],
         };
 
@@ -815,6 +818,7 @@ export class Dispatcher {
       priority: 2,
       type: "task",
       status: "in_progress",
+      labels: [],
       dependencies: [],
     };
 

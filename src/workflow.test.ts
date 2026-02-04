@@ -37,6 +37,7 @@ describe("getFirstAgent", () => {
     priority: 2,
     type: "task",
     status: "open",
+    labels: [],
     dependencies: [],
   };
 
@@ -50,8 +51,8 @@ describe("getFirstAgent", () => {
     expect(getFirstAgent(workItem)).toBe("implementation");
   });
 
-  it("returns planner for planning type", () => {
-    const workItem: WorkItem = { ...baseWorkItem, type: "planning" };
+  it("returns planner for task with planning label", () => {
+    const workItem: WorkItem = { ...baseWorkItem, type: "task", labels: ["planning"] };
     expect(getFirstAgent(workItem)).toBe("planner");
   });
 
@@ -91,6 +92,7 @@ describe("workflow functions with mocked beads", () => {
         priority: 2,
         type: "task",
         status: "open",
+        labels: [],
         dependencies: [],
       };
 
@@ -959,6 +961,7 @@ describe("workflow epic title/description building", () => {
       priority: 1,
       type: "task",
       status: "open",
+      labels: [],
       dependencies: [],
     };
 
@@ -978,6 +981,7 @@ describe("workflow epic title/description building", () => {
       priority: 0,
       type: "epic",
       status: "open",
+      labels: [],
       dependencies: [],
     };
 
@@ -1010,6 +1014,7 @@ describe("workflow step context building for first step", () => {
       priority: 1,
       type: "task",
       status: "open",
+      labels: [],
       dependencies: [],
     };
 

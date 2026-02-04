@@ -125,6 +125,7 @@ export class BeadsClient {
    */
   update(id: string, cwd: string, options: BeadUpdateOptions): Bead {
     const args = ["update", id];
+    // Note: bd update returns an array, we extract the first element
 
     if (options.title) args.push("--title", `"${this.escapeQuotes(options.title)}"`);
     if (options.description) args.push("--description", `"${this.escapeQuotes(options.description)}"`);
@@ -141,7 +142,9 @@ export class BeadsClient {
       }
     }
 
-    return this.exec(args, cwd) as Bead;
+    // bd update returns an array, extract first element
+    const result = this.exec(args, cwd) as Bead[];
+    return result[0];
   }
 
   /**

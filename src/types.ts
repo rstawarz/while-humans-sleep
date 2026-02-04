@@ -34,8 +34,9 @@ export interface WorkItem {
   title: string;
   description: string;
   priority: number;        // 0-4, where 0 is critical
-  type: "epic" | "task" | "bug" | "planning";
+  type: "epic" | "task" | "bug" | "feature" | "chore";
   status: "open" | "in_progress" | "blocked" | "closed";
+  labels: string[];        // labels for categorization (e.g., "planning", "agent:planner")
   dependencies: string[];
 }
 

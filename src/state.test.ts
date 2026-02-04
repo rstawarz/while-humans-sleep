@@ -17,6 +17,7 @@ describe("state serialization", () => {
     priority: 2,
     type: "task",
     status: "in_progress",
+    labels: [],
     dependencies: [],
   };
 
@@ -118,6 +119,7 @@ describe("state serialization", () => {
       priority: 0,
       type: "epic",
       status: "blocked",
+      labels: ["planning", "whs"],
       dependencies: ["bd-122", "bd-121"],
     };
 
@@ -264,6 +266,7 @@ describe.skip("state persistence integration", () => {
         priority: 2,
         type: "task",
         status: "in_progress",
+        labels: [],
         dependencies: [],
       },
       workflowEpicId: "w-1",
@@ -304,6 +307,7 @@ describe("state mutation functions", () => {
     priority: 2,
     type: "task",
     status: "in_progress",
+    labels: [],
     dependencies: [],
   };
 
