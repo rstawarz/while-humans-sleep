@@ -87,6 +87,7 @@ vi.mock("./workflow.js", () => ({
   completeStep: vi.fn(),
   completeWorkflow: vi.fn(),
   getWorkflowContext: vi.fn(() => ""),
+  getWorkflowEpic: vi.fn(),
   getReadyWorkflowSteps: vi.fn(() => []),
   getSourceBeadInfo: vi.fn(),
   getFirstAgent: vi.fn(() => "implementation"),
@@ -353,7 +354,14 @@ describe("Dispatcher E2E", () => {
         },
       ]);
 
-      // Source info for the step
+      // Return the parent epic when looking up the step
+      mockWorkflow.getWorkflowEpic.mockReturnValue({
+        id: "bd-w001",
+        title: "test-project:bd-123 - Test task",
+        labels: ["project:test-project", "source:bd-123"],
+      });
+
+      // Source info from the epic
       mockWorkflow.getSourceBeadInfo.mockReturnValue({
         project: "test-project",
         beadId: "bd-123",

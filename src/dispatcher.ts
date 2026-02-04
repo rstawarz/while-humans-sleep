@@ -41,6 +41,7 @@ import {
   completeStep,
   completeWorkflow,
   getWorkflowContext,
+  getWorkflowEpic,
   getReadyWorkflowSteps as getReadySteps,
   getSourceBeadInfo,
   getFirstAgent,
@@ -435,10 +436,17 @@ export class Dispatcher {
    * Dispatches a workflow step (continuing an existing workflow)
    */
   private async dispatchWorkflowStep(step: WorkItem): Promise<void> {
-    // Get source bead info from the workflow epic
-    const sourceInfo = getSourceBeadInfo(step.id);
+    // Get the parent epic first, then extract source info from it
+    const epic = getWorkflowEpic(step.id);
+    if (!epic) {
+      console.error(`Cannot find workflow epic for step ${step.id}`);
+      return;
+    }
+
+    // Get source bead info from the workflow epic (not the step)
+    const sourceInfo = getSourceBeadInfo(epic.id);
     if (!sourceInfo) {
-      console.error(`Cannot find source for step ${step.id}`);
+      console.error(`Cannot find source labels on epic ${epic.id}`);
       return;
     }
 
@@ -459,8 +467,8 @@ export class Dispatcher {
       baseBranch: project.baseBranch,
     });
 
-    // Get the workflow epic ID (parent of this step)
-    const epicId = step.id.split(".").slice(0, -1).join(".") || step.id;
+    // Use the epic ID we already fetched
+    const epicId = epic.id;
 
     // Mark step as in progress
     markStepInProgress(step.id);
