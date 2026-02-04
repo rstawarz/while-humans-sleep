@@ -272,6 +272,7 @@ export class Dispatcher {
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
       if (this.state.activeWork.has(step.id)) continue;
+      if (this.hasPendingQuestionForStep(step.id)) continue;
 
       // Dispatch asynchronously and track the promise
       const agentPromise = this.dispatchWorkflowStep(step)
@@ -303,6 +304,18 @@ export class Dispatcher {
 
   private isAtCapacity(): boolean {
     return this.state.activeWork.size >= this.config.concurrency.maxTotal;
+  }
+
+  /**
+   * Checks if there's a pending question for a workflow step
+   */
+  private hasPendingQuestionForStep(stepId: string): boolean {
+    for (const question of this.state.pendingQuestions.values()) {
+      if (question.workflowStepId === stepId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
