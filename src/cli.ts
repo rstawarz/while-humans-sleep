@@ -18,7 +18,11 @@ import {
   getProject,
   listProjects,
   getConfigPath,
+  getConfigDir,
   expandPath,
+  isInitialized,
+  initializeWhs,
+  getDefaultOrchestratorPath,
 } from "./config.js";
 import { beads } from "./beads/index.js";
 import {
@@ -37,9 +41,80 @@ program
   .version("0.1.0");
 
 program
+  .command("init")
+  .description("Initialize WHS (run once before adding projects)")
+  .option("-o, --orchestrator <path>", "Orchestrator beads location", getDefaultOrchestratorPath())
+  .action(async (options) => {
+    // Check if already initialized
+    if (isInitialized()) {
+      console.log("WHS is already initialized.");
+      console.log(`  Config: ${getConfigPath()}`);
+      const config = loadConfig();
+      console.log(`  Orchestrator: ${config.orchestratorPath}`);
+      console.log("");
+      console.log("Use `whs add <name> <path>` to add projects.");
+      return;
+    }
+
+    const orchestratorPath = expandPath(options.orchestrator);
+
+    console.log("🌙 Initializing While Humans Sleep\n");
+    console.log(`  Config directory: ${getConfigDir()}`);
+    console.log(`  Orchestrator: ${orchestratorPath}`);
+    console.log("");
+
+    // 1. Initialize config
+    console.log("Creating config...");
+    const config = initializeWhs(orchestratorPath);
+    console.log(`  Created ${getConfigPath()}`);
+
+    // 2. Create orchestrator directory
+    if (!existsSync(orchestratorPath)) {
+      console.log("Creating orchestrator directory...");
+      mkdirSync(orchestratorPath, { recursive: true });
+    }
+
+    // 3. Initialize git repo
+    const gitDir = resolve(orchestratorPath, ".git");
+    if (!existsSync(gitDir)) {
+      console.log("Initializing git repository...");
+      execSync("git init", { cwd: orchestratorPath, stdio: "pipe" });
+    }
+
+    // 4. Initialize beads
+    if (!beads.isInitialized(orchestratorPath)) {
+      console.log("Initializing beads...");
+      beads.init(orchestratorPath, false);
+    }
+
+    // 5. Configure sync-branch and start daemon
+    console.log("Starting beads daemon...");
+    try {
+      beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
+      console.log("  Sync branch: beads-sync");
+      console.log("  Daemon started with auto-commit");
+    } catch (err) {
+      console.warn(`  Warning: Could not start daemon: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    console.log("\n✅ WHS initialized successfully!\n");
+    console.log("Next steps:");
+    console.log("  1. Add a project:  whs add myproject ~/work/myproject");
+    console.log("  2. Create tasks:   bd create \"Task title\" (in project dir)");
+    console.log("  3. Start working:  whs start");
+  });
+
+program
   .command("start")
   .description("Start the dispatcher")
   .action(async () => {
+    // Check if WHS is initialized
+    if (!isInitialized()) {
+      console.error("Error: WHS is not initialized.");
+      console.error("Run `whs init` first to set up the orchestrator.");
+      process.exit(1);
+    }
+
     const config = loadConfig();
 
     // Ensure beads daemons are running for all projects
@@ -84,6 +159,13 @@ program
   .option("-s, --stealth", "Use beads stealth mode (local only)")
   .option("-a, --agents-path <path>", "Path to agent definitions", "docs/llm/agents")
   .action(async (name, projectPath, options) => {
+    // Check if WHS is initialized
+    if (!isInitialized()) {
+      console.error("Error: WHS is not initialized.");
+      console.error("Run `whs init` first to set up the orchestrator.");
+      process.exit(1);
+    }
+
     const beadsMode = options.stealth ? "stealth" : "committed";
 
     // Expand and resolve the path
@@ -143,32 +225,7 @@ program
       console.log("  Beads already initialized");
     }
 
-    // 6. Ensure orchestrator beads repo exists
-    const config = loadConfig();
-    const orchestratorPath = expandPath(config.orchestratorPath);
-
-    if (!existsSync(orchestratorPath)) {
-      console.log(`Creating orchestrator directory: ${orchestratorPath}`);
-      mkdirSync(orchestratorPath, { recursive: true });
-
-      // Initialize as git repo
-      execSync("git init", { cwd: orchestratorPath, stdio: "pipe" });
-      console.log("  Git repository initialized");
-
-      // Initialize beads in orchestrator (always committed mode)
-      beads.init(orchestratorPath, false);
-      console.log("  Beads initialized in orchestrator");
-    } else if (!beads.isInitialized(orchestratorPath)) {
-      // Orchestrator dir exists but beads not initialized
-      if (!existsSync(resolve(orchestratorPath, ".git"))) {
-        execSync("git init", { cwd: orchestratorPath, stdio: "pipe" });
-        console.log("  Git repository initialized in orchestrator");
-      }
-      beads.init(orchestratorPath, false);
-      console.log("  Beads initialized in orchestrator");
-    }
-
-    // 7. Configure beads sync-branch and start daemon
+    // 6. Configure beads sync-branch and start daemon
     // This ensures beads commits go to a separate branch, keeping main clean for PR merges
     console.log("Configuring beads daemon...");
     try {
@@ -180,15 +237,7 @@ program
       console.warn("  You may need to start it manually: bd daemon start --auto-commit");
     }
 
-    // 8. Also configure daemon for orchestrator
-    try {
-      beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
-      console.log("  Orchestrator daemon configured");
-    } catch (err) {
-      console.warn(`  Warning: Could not start orchestrator daemon: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 9. Add project to config
+    // 7. Add project to config
     const added = addProject(name, resolvedPath, {
       baseBranch: options.branch,
       agentsPath: options.agentsPath,
