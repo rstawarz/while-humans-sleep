@@ -687,3 +687,90 @@ describe("state module direct tests", () => {
     expect(answered).toHaveLength(2);
   });
 });
+
+// ============================================================
+// Lock File Tests
+// ============================================================
+
+describe("lock file management", () => {
+  it("getLockPath returns path to lock file", async () => {
+    const { getLockPath } = await import("./state.js");
+    const path = getLockPath();
+    expect(path).toContain("dispatcher.lock");
+    expect(path).toContain(".whs");
+  });
+
+  it("acquireLock and releaseLock work together", async () => {
+    const { acquireLock, releaseLock, getLockInfo } = await import("./state.js");
+
+    // Ensure no lock exists
+    releaseLock();
+
+    // Should be able to acquire lock
+    const acquired = acquireLock();
+    expect(acquired).toBe(true);
+
+    // Lock info should show our PID
+    const info = getLockInfo();
+    expect(info).not.toBeNull();
+    expect(info?.pid).toBe(process.pid);
+
+    // Release lock
+    releaseLock();
+
+    // Lock info should be null
+    const infoAfter = getLockInfo();
+    expect(infoAfter).toBeNull();
+  });
+
+  it("acquireLock returns false if already locked by current process", async () => {
+    const { acquireLock, releaseLock } = await import("./state.js");
+
+    // Clean up first
+    releaseLock();
+
+    // First acquire should succeed
+    const first = acquireLock();
+    expect(first).toBe(true);
+
+    // Second acquire should fail (lock held by us)
+    const second = acquireLock();
+    expect(second).toBe(false);
+
+    // Clean up
+    releaseLock();
+  });
+
+  it("getLockInfo returns null when no lock exists", async () => {
+    const { releaseLock, getLockInfo } = await import("./state.js");
+
+    releaseLock(); // Ensure no lock
+
+    const info = getLockInfo();
+    expect(info).toBeNull();
+  });
+
+  it("getLockInfo detects stale locks from dead processes", async () => {
+    const { getLockInfo, getLockPath, releaseLock } = await import("./state.js");
+    const { writeFileSync } = await import("fs");
+    const { ensureConfigDir } = await import("./config.js");
+
+    // Clean up first
+    releaseLock();
+    ensureConfigDir();
+
+    // Create a fake lock with non-existent PID
+    const fakeLock = {
+      pid: 999999999, // Very unlikely to be a real PID
+      startedAt: new Date().toISOString(),
+    };
+    writeFileSync(getLockPath(), JSON.stringify(fakeLock));
+
+    // getLockInfo should return null (stale lock)
+    const info = getLockInfo();
+    expect(info).toBeNull();
+
+    // Clean up
+    releaseLock();
+  });
+});
