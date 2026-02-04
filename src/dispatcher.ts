@@ -30,6 +30,9 @@ import {
   removeAnsweredQuestion,
   getAnsweredQuestions,
   setPaused,
+  acquireLock,
+  releaseLock,
+  getLockInfo,
   type DispatcherState,
 } from "./state.js";
 import {
@@ -54,8 +57,12 @@ export class Dispatcher {
   private state: DispatcherState;
   private notifier: Notifier;
   private running: boolean = false;
+  private tickCount: number = 0;
 
   private readonly config: Config;
+
+  // Check daemon health every 60 ticks (5 min at 5s intervals)
+  private readonly DAEMON_HEALTH_CHECK_INTERVAL = 60;
 
   constructor(config: Config, notifier: Notifier) {
     this.config = config;
@@ -67,7 +74,25 @@ export class Dispatcher {
   }
 
   async start(): Promise<void> {
+    // Check if another dispatcher is already running
+    const existingLock = getLockInfo();
+    if (existingLock) {
+      console.error("❌ Another dispatcher is already running!");
+      console.error(`   PID: ${existingLock.pid}`);
+      console.error(`   Started: ${existingLock.startedAt}`);
+      console.error("");
+      console.error("Use `whs status` to check its status, or kill the process manually.");
+      throw new Error("Dispatcher already running");
+    }
+
+    // Acquire lock
+    if (!acquireLock()) {
+      console.error("❌ Failed to acquire dispatcher lock");
+      throw new Error("Failed to acquire lock");
+    }
+
     console.log("🌙 While Humans Sleep - Starting dispatcher");
+    console.log(`   PID: ${process.pid}`);
     console.log(`   Projects: ${[...this.projects.keys()].join(", ") || "(none)"}`);
     console.log(`   Max concurrent: ${this.config.concurrency.maxTotal}`);
     console.log(`   Orchestrator: ${this.config.orchestratorPath}`);
@@ -86,6 +111,12 @@ export class Dispatcher {
       if (!this.state.paused) {
         try {
           await this.tick();
+          this.tickCount++;
+
+          // Periodic daemon health check
+          if (this.tickCount % this.DAEMON_HEALTH_CHECK_INTERVAL === 0) {
+            await this.checkDaemonHealth();
+          }
         } catch (err) {
           console.error("Error in dispatcher tick:", err);
         }
@@ -98,6 +129,7 @@ export class Dispatcher {
     console.log("🛑 Stopping dispatcher...");
     this.running = false;
     saveState(this.state);
+    releaseLock();
   }
 
   pause(): void {
@@ -108,6 +140,42 @@ export class Dispatcher {
   resume(): void {
     this.state = setPaused(this.state, false);
     console.log("▶️  Dispatcher resumed");
+  }
+
+  /**
+   * Checks beads daemon health for all projects and restarts if needed
+   */
+  private async checkDaemonHealth(): Promise<void> {
+    let restartedCount = 0;
+
+    for (const project of this.projects.values()) {
+      const projectPath = expandPath(project.repoPath);
+      if (!beads.isDaemonRunning(projectPath)) {
+        console.log(`🔄 Restarting beads daemon for ${project.name}...`);
+        try {
+          beads.ensureDaemonWithSyncBranch(projectPath, "beads-sync");
+          restartedCount++;
+        } catch (err) {
+          console.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    // Also check orchestrator
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+    if (!beads.isDaemonRunning(orchestratorPath)) {
+      console.log("🔄 Restarting beads daemon for orchestrator...");
+      try {
+        beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
+        restartedCount++;
+      } catch (err) {
+        console.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (restartedCount > 0) {
+      console.log(`   Restarted ${restartedCount} daemon(s)`);
+    }
   }
 
   private async tick(): Promise<void> {
