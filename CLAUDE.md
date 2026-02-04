@@ -189,6 +189,9 @@ Key packages:
 ## Links
 
 - [Architecture Doc](docs/ARCHITECTURE.md)
+- [Gastown Research](docs/GASTOWN-RESEARCH.md) - Best practices from multi-agent orchestration
+- [Agent Definitions](docs/llm/agents/README.md)
 - [Beads](https://github.com/steveyegge/beads)
+- [Gastown](https://github.com/steveyegge/gastown)
 - [Worktrunk](https://worktrunk.dev/)
 - [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)

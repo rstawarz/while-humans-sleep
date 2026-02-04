@@ -86,6 +86,11 @@ export interface PendingQuestion {
   context: string;
 }
 
+export interface AnsweredQuestion extends PendingQuestion {
+  answer: string;
+  answeredAt: Date;
+}
+
 // === Notifier ===
 
 export interface Notifier {

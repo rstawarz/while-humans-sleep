@@ -5,8 +5,8 @@
 ## Summary
 
 - **Completed:** 1
-- **Pending:** 17
-- **Total:** 18
+- **Pending:** 18
+- **Total:** 19
 
 ## Completed
 
@@ -158,6 +158,31 @@ Apply learnings to our agent definitions.
 
 ---
 
+### 📋 #19: Add prerequisite validation for `whs add`
+**Status:** pending | **Blocks:** #10
+
+Add validation step when projects are added via `whs add`:
+
+**Prerequisites to validate:**
+1. `wt --version` succeeds (worktrunk is installed)
+2. `git --version` succeeds (git is installed)
+3. Target path exists and is a valid git repository (`git rev-parse --git-dir`)
+
+**Optional enhancements:**
+- Suggest creating `.config/wt.toml` for project hooks (e.g., `post-create = "npm ci"`)
+- Warn if worktree base directory isn't writable
+- Check worktrunk version compatibility (if needed)
+
+**Implementation location:** `src/config.ts` or new `src/validation.ts`
+
+**Research notes (from worktrunk docs):**
+- No `wt init` required - worktrunk works with any git repo
+- Default worktree path: `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`
+- Shell integration NOT needed for WHS (we pass `cwd` to execSync)
+- Project hooks defined in `.config/wt.toml` are optional but useful
+
+---
+
 ## Blocked Tasks
 
 ### 🚫 #7: Implement handoff parsing with trust-but-verify
@@ -192,9 +217,10 @@ Complete `src/dispatcher.ts`:
 ---
 
 ### 🚫 #10: Implement CLI add command
-**Status:** pending | **Blocked by:** #3 | **Blocks:** #18
+**Status:** pending | **Blocked by:** #3, #19 | **Blocks:** #18
 
 Complete `whs add <name> <path>`:
+- Run prerequisite validation (#19)
 - Validate path exists and is a git repo
 - Prompt for base branch (or use --branch flag)
 - Prompt for beads mode (committed/stealth) (or use --stealth flag)
@@ -282,6 +308,10 @@ This will be a real API test (YOLO), accept the cost.
 #2 ────────────────────────┤
                            │
 #3 ───┬─► #10 ─────────────┤
+      │    ▲               │
+      │    │               │
+      │   #19              │
+      │                    │
       └─► #11              │
                            │
 #5 ───┬─► #9               │
@@ -290,5 +320,5 @@ This will be a real API test (YOLO), accept the cost.
                            │
 #15 ───────────────────────┘
 
-#4, #16, #17 - No dependencies
+#4, #16, #17, #19 - No dependencies (except #19 blocks #10)
 ```
