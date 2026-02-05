@@ -214,7 +214,7 @@ export function removeWorktree(
     throw new Error(`Cannot remove main worktree: ${branchName}`);
   }
 
-  const args = ["remove", branchName];
+  const args = ["remove", branchName, "--foreground"];
   if (options?.force) {
     args.push("--force");
   }
