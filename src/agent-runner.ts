@@ -300,8 +300,15 @@ export async function runAgent(
       }
     }
   } catch (err) {
-    success = false;
-    error = err instanceof Error ? err.message : String(err);
+    const errMessage = err instanceof Error ? err.message : String(err);
+    // SDK sometimes throws "process exited with code 1" after a successful query
+    // If we already received a success result, ignore this spurious error
+    if (success && errMessage.includes("process exited")) {
+      // Ignore - we already have a successful result
+    } else {
+      success = false;
+      error = errMessage;
+    }
   }
 
   // Record metrics if context provided
