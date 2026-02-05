@@ -101,6 +101,43 @@ describe("BeadsClient", () => {
       );
     });
 
+    it("passes label-all filter", () => {
+      mockExecSync.mockReturnValue("[]");
+
+      client.ready(testCwd, { labelAll: ["whs:step"] });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd ready --label whs:step --json",
+        expect.any(Object)
+      );
+    });
+
+    it("passes label-any filter", () => {
+      mockExecSync.mockReturnValue("[]");
+
+      client.ready(testCwd, { labelAny: ["urgent", "critical"] });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd ready --label-any urgent,critical --json",
+        expect.any(Object)
+      );
+    });
+
+    it("passes all label filters together", () => {
+      mockExecSync.mockReturnValue("[]");
+
+      client.ready(testCwd, {
+        type: "task",
+        labelAll: ["whs:step"],
+        labelNone: ["whs:question"],
+      });
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "bd ready --type task --label whs:step --label-none whs:question --json",
+        expect.any(Object)
+      );
+    });
+
     it("returns empty array when no tasks ready", () => {
       mockExecSync.mockReturnValue("[]");
 

@@ -61,6 +61,9 @@ export class BeadsClient {
     if (options?.priority !== undefined) args.push("--priority", String(options.priority));
     if (options?.priorityMin !== undefined) args.push("--priority-min", String(options.priorityMin));
     if (options?.priorityMax !== undefined) args.push("--priority-max", String(options.priorityMax));
+    if (options?.labelAny?.length) args.push("--label-any", options.labelAny.join(","));
+    // --label (or -l) is the AND filter in beads CLI
+    if (options?.labelAll?.length) args.push("--label", options.labelAll.join(","));
     if (options?.labelNone?.length) args.push("--label-none", options.labelNone.join(","));
 
     const raw = this.exec(args, cwd) as RawBead[];
