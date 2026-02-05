@@ -170,7 +170,7 @@ export class BeadsClient {
    * Add a comment to a bead
    */
   comment(id: string, text: string, cwd: string): void {
-    this.execRaw(["comment", id, `"${this.escapeQuotes(text)}"`], cwd);
+    this.execRaw(["comments", "add", id, `"${this.escapeQuotes(text)}"`], cwd);
   }
 
   /**

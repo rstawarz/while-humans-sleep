@@ -323,7 +323,7 @@ describe("BeadsClient", () => {
       client.comment("bd-a1b2", "Found the issue in auth.ts", testCwd);
 
       expect(mockExecSync).toHaveBeenCalledWith(
-        'bd comment bd-a1b2 "Found the issue in auth.ts"',
+        'bd comments add bd-a1b2 "Found the issue in auth.ts"',
         expect.any(Object)
       );
     });
