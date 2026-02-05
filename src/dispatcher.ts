@@ -43,6 +43,8 @@ import {
   getFirstAgent,
   markStepInProgress,
   getWorkflowForSource,
+  getStepResumeInfo,
+  clearStepResumeInfo,
 } from "./workflow.js";
 import { ensureWorktree, removeWorktree } from "./worktree.js";
 import { runAgent, formatAgentPrompt, resumeWithAnswer } from "./agent-runner.js";
@@ -455,10 +457,16 @@ export class Dispatcher {
 
     const agent = step.title; // Step title is the agent name
 
-    console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId}`);
+    // Check if this step has resume info (was blocked by a question that's now answered)
+    const resumeInfo = getStepResumeInfo(step.id);
+    if (resumeInfo) {
+      console.log(`🔄 Resuming ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} (answer provided)`);
+    } else {
+      console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId}`);
+    }
 
-    // Ensure worktree exists
-    const worktreePath = ensureWorktree(sourceInfo.project, sourceInfo.beadId, {
+    // Use worktree from resume info if available, otherwise ensure it exists
+    const worktreePath = resumeInfo?.worktree || ensureWorktree(sourceInfo.project, sourceInfo.beadId, {
       baseBranch: project.baseBranch,
     });
 
@@ -476,7 +484,7 @@ export class Dispatcher {
       },
       workflowEpicId: epicId,
       workflowStepId: step.id,
-      sessionId: "",
+      sessionId: resumeInfo?.sessionId || "",
       worktreePath,
       startedAt: new Date(),
       agent,
@@ -484,8 +492,14 @@ export class Dispatcher {
     };
     this.state = addActiveWork(this.state, activeWork);
 
-    // Run the agent
-    await this.runAgentStep(activeWork);
+    // Run or resume the agent
+    if (resumeInfo) {
+      // Clear the resume info now that we're using it
+      clearStepResumeInfo(step.id);
+      await this.resumeAgentStep(activeWork, resumeInfo.sessionId, resumeInfo.answer);
+    } else {
+      await this.runAgentStep(activeWork);
+    }
   }
 
   /**
@@ -528,6 +542,58 @@ export class Dispatcher {
       });
 
       // Check for pending question
+      if (result.pendingQuestion) {
+        await this.handlePendingQuestion(work, result);
+        return;
+      }
+
+      // Get handoff (trust but verify)
+      const handoff = await getHandoff(
+        result.output,
+        result.sessionId,
+        work.worktreePath
+      );
+
+      // Process handoff
+      await this.processHandoff(work, handoff, result.costUsd);
+    } catch (err) {
+      await this.handleAgentError(work, err);
+    }
+  }
+
+  /**
+   * Resumes an agent after a question was answered
+   *
+   * Similar to runAgentStep but uses resumeWithAnswer to continue
+   * an existing session with the provided answer.
+   */
+  private async resumeAgentStep(
+    work: ActiveWork,
+    sessionId: string,
+    answer: string
+  ): Promise<void> {
+    await this.notifier.notifyProgress(work, `Resuming ${work.agent} agent with answer`);
+
+    try {
+      // Resume the agent session with the answer
+      const result = await resumeWithAnswer(sessionId, answer, {
+        cwd: work.worktreePath,
+        maxTurns: 50,
+        onOutput: (_text) => {
+          // Could stream to notifier here
+        },
+        onToolUse: (_tool, _input) => {
+          // Could log tool use here
+        },
+      });
+
+      // Update session ID and cost
+      this.state = updateActiveWork(this.state, work.workItem.id, {
+        sessionId: result.sessionId,
+        costSoFar: work.costSoFar + result.costUsd,
+      });
+
+      // Check for another pending question
       if (result.pendingQuestion) {
         await this.handlePendingQuestion(work, result);
         return;
@@ -744,82 +810,6 @@ export class Dispatcher {
   }
 
   // === Public API for CLI ===
-
-  /**
-   * Answers a pending question bead and resumes the agent session
-   *
-   * Flow:
-   * 1. Mark the blocked step as in_progress (prevents race)
-   * 2. Answer and close the question bead (unblocks step)
-   * 3. Resume the agent session with the answer
-   * 4. Process the result (may create new question or handoff)
-   */
-  async answerQuestion(questionId: string, answer: string): Promise<void> {
-    const orchestratorPath = expandPath(this.config.orchestratorPath);
-
-    // Get the question bead
-    // Questions are stored as tasks with "whs:question" label
-    const questionBead = beads.show(questionId, orchestratorPath);
-    const isQuestion = questionBead?.labels?.includes("whs:question");
-    if (!questionBead || !isQuestion || questionBead.status !== "open") {
-      throw new Error(`Question not found or already answered: ${questionId}`);
-    }
-
-    // Parse question data from description
-    const questionData = beads.parseQuestionData(questionBead);
-    console.log(`📝 Answering question ${questionId}`);
-
-    // 1. Mark the blocked step as in_progress FIRST (prevents race condition)
-    markStepInProgress(questionData.metadata.step_id);
-
-    // 2. Answer and close the question bead
-    beads.answerQuestion(questionId, answer, orchestratorPath);
-
-    // 3. Resume the agent session with the answer
-    const result = await resumeWithAnswer(questionData.metadata.session_id, answer, {
-      cwd: questionData.metadata.worktree,
-      maxTurns: 50,
-    });
-
-    // 4. Recreate active work entry
-    const workItem: WorkItem = {
-      id: questionData.metadata.step_id, // Use step_id as work item id
-      project: questionData.metadata.project,
-      title: "",
-      description: "",
-      priority: 2,
-      type: "task",
-      status: "in_progress",
-      labels: [],
-      dependencies: [],
-    };
-
-    const work: ActiveWork = {
-      workItem,
-      workflowEpicId: questionData.metadata.epic_id,
-      workflowStepId: questionData.metadata.step_id,
-      sessionId: result.sessionId,
-      worktreePath: questionData.metadata.worktree,
-      startedAt: new Date(),
-      agent: "unknown", // Would need to extract from step
-      costSoFar: result.costUsd,
-    };
-
-    // Check for another question
-    if (result.pendingQuestion) {
-      await this.handlePendingQuestion(work, result);
-      return;
-    }
-
-    // Get handoff and process
-    const handoff = await getHandoff(
-      result.output,
-      result.sessionId,
-      questionData.metadata.worktree
-    );
-
-    await this.processHandoff(work, handoff, result.costUsd);
-  }
 
   /**
    * Gets pending questions from orchestrator beads

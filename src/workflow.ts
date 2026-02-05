@@ -310,6 +310,83 @@ export function addStepComment(stepId: string, comment: string): void {
 }
 
 /**
+ * Resume info stored on a step when a question has been answered
+ */
+export interface StepResumeInfo {
+  sessionId: string;
+  answer: string;
+  worktree: string;
+}
+
+// Marker for resume info in step labels
+const RESUME_LABEL_PREFIX = "whs:resume:";
+
+/**
+ * Stores resume info on a step (when a question is answered)
+ *
+ * The dispatcher will pick this up when the step becomes unblocked.
+ * We use a label with base64-encoded JSON to store the data.
+ */
+export function setStepResumeInfo(
+  stepId: string,
+  info: StepResumeInfo
+): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  // Encode resume info as base64 JSON in a label
+  const encoded = Buffer.from(JSON.stringify(info)).toString("base64");
+  beads.update(stepId, orchestratorPath, {
+    labelAdd: [`${RESUME_LABEL_PREFIX}${encoded}`],
+  });
+}
+
+/**
+ * Gets resume info from a step (if question was answered)
+ *
+ * Returns null if no resume info found.
+ */
+export function getStepResumeInfo(stepId: string): StepResumeInfo | null {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const step = beads.show(stepId, orchestratorPath);
+    const resumeLabel = step.labels?.find((l) =>
+      l.startsWith(RESUME_LABEL_PREFIX)
+    );
+
+    if (!resumeLabel) return null;
+
+    const encoded = resumeLabel.slice(RESUME_LABEL_PREFIX.length);
+    const decoded = Buffer.from(encoded, "base64").toString("utf-8");
+    return JSON.parse(decoded) as StepResumeInfo;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clears resume info from a step (after resuming)
+ */
+export function clearStepResumeInfo(stepId: string): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const step = beads.show(stepId, orchestratorPath);
+    const resumeLabel = step.labels?.find((l) =>
+      l.startsWith(RESUME_LABEL_PREFIX)
+    );
+
+    if (resumeLabel) {
+      beads.update(stepId, orchestratorPath, {
+        labelRemove: [resumeLabel],
+      });
+    }
+  } catch {
+    // Ignore errors
+  }
+}
+
+/**
  * Extracts the agent name from a bead's labels or title
  */
 function extractAgentFromBead(bead: Bead): string {

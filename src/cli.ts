@@ -31,9 +31,6 @@ import {
   getStatePath,
   getLockInfo,
 } from "./state.js";
-import { markStepInProgress } from "./workflow.js";
-import { resumeWithAnswer } from "./agent-runner.js";
-import { getHandoff } from "./handoff.js";
 
 const program = new Command();
 
@@ -703,12 +700,13 @@ program
 
 program
   .command("answer <questionId> <answer>")
-  .description("Answer a pending question")
+  .description("Answer a pending question (dispatcher will resume agent)")
   .action(async (questionId, answer) => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
 
+    const { submitAnswer } = await import("./questions.js");
     const config = loadConfig();
     const orchestratorPath = expandPath(config.orchestratorPath);
 
@@ -748,7 +746,7 @@ program
       questionId = questionBead.id;
     }
 
-    // Parse question data
+    // Parse question data for display
     const questionData = beads.parseQuestionData(questionBead);
 
     console.log(`Answering question: ${questionId}`);
@@ -758,46 +756,17 @@ program
     console.log(`  Answer: ${answer}`);
     console.log("");
 
-    try {
-      // 1. Mark the blocked step as in_progress FIRST (prevents race condition)
-      console.log("Marking step as in_progress...");
-      markStepInProgress(questionData.metadata.step_id);
+    // Submit the answer (stores resume info and closes question bead)
+    const result = submitAnswer(questionId, answer);
 
-      // 2. Answer and close the question bead
-      console.log("Closing question bead...");
-      beads.answerQuestion(questionId, answer, orchestratorPath);
-
-      // 3. Resume the agent session with the answer
-      console.log("Resuming agent session...");
-      const result = await resumeWithAnswer(questionData.metadata.session_id, answer, {
-        cwd: questionData.metadata.worktree,
-        maxTurns: 50,
-      });
-
-      // Check for another question
-      if (result.pendingQuestion) {
-        console.log("\n⚠️  Agent has another question. Check `whs questions` for details.");
-        // Note: The dispatcher will create the question bead when it next ticks
-        // For now, we just inform the user
-      } else {
-        // Get handoff and log it
-        const handoff = await getHandoff(
-          result.output,
-          result.sessionId,
-          questionData.metadata.worktree
-        );
-        console.log(`\n✅ Agent resumed successfully.`);
-        console.log(`   Next agent: ${handoff.next_agent}`);
-        if (handoff.context) {
-          console.log(`   Context: ${handoff.context.slice(0, 100)}...`);
-        }
-      }
-
-      console.log(`\nCost for this session: $${result.costUsd.toFixed(4)}`);
-    } catch (err) {
-      console.error(`Error processing answer: ${err instanceof Error ? err.message : String(err)}`);
+    if (!result.success) {
+      console.error(`Error: ${result.error}`);
       process.exit(1);
     }
+
+    console.log(`✅ Answer stored for step ${result.stepId}`);
+    console.log(`   The dispatcher will resume the agent on its next tick.`);
+    console.log(`\n   Run 'whs status' to monitor progress.`);
   });
 
 program
@@ -870,24 +839,17 @@ program
         continue;
       }
 
-      console.log("\n   Answer submitted. Resuming agent...");
-
-      const result = await submitAnswer(question.beadId, answer);
+      // Submit the answer (stores resume info and closes question bead)
+      const result = submitAnswer(question.beadId, answer);
 
       if (!result.success) {
         console.log(`   Error: ${result.error}\n`);
         continue;
       }
 
-      if (result.handoff) {
-        if (result.handoff.next_agent === "DONE") {
-          console.log("   Workflow complete!\n");
-        } else if (result.handoff.next_agent === "BLOCKED") {
-          console.log("   Workflow blocked.\n");
-        } else {
-          console.log(`   Handoff to: ${result.handoff.next_agent}\n`);
-        }
-      }
+      // Answer stored - dispatcher will resume the agent
+      console.log(`   Answer stored for step ${result.stepId}`);
+      console.log("   The dispatcher will resume the agent on its next tick.\n");
 
       console.log(separator + "\n");
     }

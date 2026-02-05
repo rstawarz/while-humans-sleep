@@ -80,6 +80,8 @@ vi.mock("./workflow.js", () => ({
   getFirstAgent: vi.fn(() => "implementation"),
   markStepInProgress: vi.fn(),
   getWorkflowForSource: vi.fn(() => null),
+  getStepResumeInfo: vi.fn(() => null),
+  clearStepResumeInfo: vi.fn(),
 }));
 
 vi.mock("./worktree.js", () => ({
