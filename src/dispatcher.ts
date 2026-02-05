@@ -637,17 +637,25 @@ export class Dispatcher {
   private async completeWorkflowSuccess(work: ActiveWork, reason: string): Promise<void> {
     completeWorkflow(work.workflowEpicId, "done", reason);
 
+    // Get the source bead info from the workflow epic (not from workItem.id which may be a step ID)
+    const sourceInfo = getSourceBeadInfo(work.workflowEpicId);
+    if (!sourceInfo) {
+      console.warn(`Could not find source bead info for epic ${work.workflowEpicId}`);
+      return;
+    }
+
     // Close the source bead in the project
-    const project = this.projects.get(work.workItem.project);
+    const project = this.projects.get(sourceInfo.project);
     if (project) {
       try {
         beads.close(
-          work.workItem.id,
+          sourceInfo.beadId,
           `Completed by WHS workflow`,
           expandPath(project.repoPath)
         );
+        console.log(`   Closed source bead: ${sourceInfo.project}/${sourceInfo.beadId}`);
       } catch (err) {
-        console.warn(`Failed to close source bead: ${err}`);
+        console.warn(`Failed to close source bead ${sourceInfo.beadId}: ${err}`);
       }
     }
 

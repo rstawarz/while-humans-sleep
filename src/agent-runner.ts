@@ -222,7 +222,8 @@ export async function runAgent(
     const hooks = options.enableSafetyHooks !== false ? buildHooks(options.cwd) : undefined;
 
     // Load environment with WHS credentials (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)
-    const env = loadWhsEnv(options.cwd);
+    // Use process.cwd() (orchestrator dir) not options.cwd (worktree) since .whs/.env is in orchestrator
+    const env = loadWhsEnv();
 
     const queryOptions: Parameters<typeof query>[0]["options"] = {
       cwd: options.cwd,

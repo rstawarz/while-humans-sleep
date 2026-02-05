@@ -8,7 +8,13 @@
 
 import { beads } from "./beads/index.js";
 import { loadConfig, expandPath } from "./config.js";
-import { markStepInProgress } from "./workflow.js";
+import {
+  markStepInProgress,
+  completeStep,
+  createNextStep,
+  completeWorkflow,
+  getSourceBeadInfo,
+} from "./workflow.js";
 import { resumeWithAnswer } from "./agent-runner.js";
 import { getHandoff } from "./handoff.js";
 import type { QuestionBeadData, Handoff, Question } from "./types.js";
@@ -125,6 +131,12 @@ export function formatQuestionForDisplay(q: FormattedQuestion): string {
 
 /**
  * Submit an answer to a question and resume the agent
+ *
+ * This function:
+ * 1. Closes the question bead
+ * 2. Resumes the agent session with the answer
+ * 3. Gets the handoff from the agent
+ * 4. Progresses the workflow (closes current step, creates next step)
  */
 export async function submitAnswer(
   questionId: string,
@@ -142,9 +154,11 @@ export async function submitAnswer(
     }
 
     const questionData = beads.parseQuestionData(questionBead);
+    const stepId = questionData.metadata.step_id;
+    const epicId = stepId.split(".")[0]; // e.g., "orc-36l.1" -> "orc-36l"
 
     // Mark step in progress (prevents dispatcher race)
-    markStepInProgress(questionData.metadata.step_id);
+    markStepInProgress(stepId);
 
     // Close the question bead
     beads.answerQuestion(questionId, answer, orchestratorPath);
@@ -165,6 +179,47 @@ export async function submitAnswer(
       result.sessionId,
       questionData.metadata.worktree
     );
+
+    // Progress the workflow based on handoff
+    if (handoff) {
+      const nextAgent = handoff.next_agent;
+      const context = handoff.context || "";
+
+      if (nextAgent === "DONE") {
+        // Workflow complete
+        completeStep(stepId, "completed");
+        completeWorkflow(epicId, "done", "Task completed successfully");
+
+        // Close the source bead in the project
+        const sourceInfo = getSourceBeadInfo(epicId);
+        if (sourceInfo) {
+          const project = config.projects.find((p) => p.name === sourceInfo.project);
+          if (project) {
+            try {
+              beads.close(
+                sourceInfo.beadId,
+                "Completed by WHS workflow",
+                expandPath(project.repoPath)
+              );
+            } catch (err) {
+              console.warn(`Failed to close source bead ${sourceInfo.beadId}: ${err}`);
+            }
+          }
+        }
+      } else if (nextAgent === "BLOCKED") {
+        // Workflow blocked - needs human intervention
+        completeStep(stepId, "blocked");
+        beads.update(epicId, orchestratorPath, { labelAdd: ["blocked:human"] });
+      } else {
+        // Create next workflow step
+        completeStep(stepId, `handoff to ${nextAgent}`);
+        createNextStep(epicId, nextAgent, context, handoff);
+      }
+    } else {
+      // No handoff - mark as blocked
+      completeStep(stepId, "no handoff");
+      beads.update(epicId, orchestratorPath, { labelAdd: ["blocked:human"] });
+    }
 
     return { success: true, handoff };
   } catch (err) {
