@@ -319,6 +319,33 @@ describe("workflow functions with mocked beads", () => {
       expect(steps[1].agent).toBe("quality_review");
     });
 
+    it("excludes question beads from ready steps", async () => {
+      const { getReadyWorkflowSteps } = await import("./workflow.js");
+
+      // Verify that beads.ready is called with labelNone to exclude questions
+      mockBeads.ready.mockReturnValue([
+        {
+          id: "bd-w001.1",
+          title: "implementation",
+          description: "Work context",
+          parent: "bd-w001",
+          labels: ["agent:implementation"],
+          status: "open",
+        },
+      ]);
+
+      getReadyWorkflowSteps();
+
+      // The key assertion: beads.ready should be called with labelNone: ["whs:question"]
+      expect(mockBeads.ready).toHaveBeenCalledWith(
+        "/mock/orchestrator",
+        expect.objectContaining({
+          type: "task",
+          labelNone: ["whs:question"],
+        })
+      );
+    });
+
     it("returns empty array on error", async () => {
       const { getReadyWorkflowSteps } = await import("./workflow.js");
 

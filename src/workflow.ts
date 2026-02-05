@@ -203,6 +203,7 @@ export function getWorkflowEpic(stepId: string): Bead | null {
  * Gets ready workflow steps from the orchestrator
  *
  * Returns steps that are ready to be worked on (no blocking dependencies).
+ * Excludes question beads which should be answered by humans, not dispatched.
  */
 export function getReadyWorkflowSteps(): WorkflowStep[] {
   const orchestratorPath = getOrchestratorPath();
@@ -210,6 +211,7 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
   try {
     const readyBeads = beads.ready(orchestratorPath, {
       type: "task",
+      labelNone: ["whs:question"],
     });
 
     // Filter to only open steps - bd ready returns both open and in_progress
