@@ -85,7 +85,7 @@ export async function startWorkflow(
   const step = beads.create(firstAgent, orchestratorPath, {
     type: "task",
     parent: epic.id,
-    labels: [`agent:${firstAgent}`],
+    labels: [`agent:${firstAgent}`, "whs:step"],
     description: stepContext,
   });
 
@@ -118,7 +118,7 @@ export function createNextStep(
     descriptionLines.push(`CI Status: ${handoff.ci_status}`);
   }
 
-  const labels = [`agent:${agent}`];
+  const labels = [`agent:${agent}`, "whs:step"];
   if (handoff?.pr_number) {
     labels.push(`pr:${handoff.pr_number}`);
   }
@@ -203,7 +203,7 @@ export function getWorkflowEpic(stepId: string): Bead | null {
  * Gets ready workflow steps from the orchestrator
  *
  * Returns steps that are ready to be worked on (no blocking dependencies).
- * Excludes question beads which should be answered by humans, not dispatched.
+ * Only returns beads with the whs:step label (excludes questions and other bead types).
  */
 export function getReadyWorkflowSteps(): WorkflowStep[] {
   const orchestratorPath = getOrchestratorPath();
@@ -211,7 +211,7 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
   try {
     const readyBeads = beads.ready(orchestratorPath, {
       type: "task",
-      labelNone: ["whs:question"],
+      labelAll: ["whs:step"],
     });
 
     // Filter to only open steps - bd ready returns both open and in_progress

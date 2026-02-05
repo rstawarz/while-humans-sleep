@@ -122,7 +122,7 @@ describe("workflow functions with mocked beads", () => {
         expect.objectContaining({
           type: "task",
           parent: "bd-w001",
-          labels: ["agent:implementation"],
+          labels: ["agent:implementation", "whs:step"],
         })
       );
     });
@@ -143,7 +143,7 @@ describe("workflow functions with mocked beads", () => {
         expect.objectContaining({
           type: "task",
           parent: "bd-w001",
-          labels: ["agent:quality_review"],
+          labels: ["agent:quality_review", "whs:step"],
         })
       );
     });
@@ -163,7 +163,7 @@ describe("workflow functions with mocked beads", () => {
         "implementation",
         "/mock/orchestrator",
         expect.objectContaining({
-          labels: ["agent:implementation", "pr:42", "ci:failed"],
+          labels: ["agent:implementation", "whs:step", "pr:42", "ci:failed"],
         })
       );
     });
@@ -319,29 +319,29 @@ describe("workflow functions with mocked beads", () => {
       expect(steps[1].agent).toBe("quality_review");
     });
 
-    it("excludes question beads from ready steps", async () => {
+    it("only returns beads with whs:step label", async () => {
       const { getReadyWorkflowSteps } = await import("./workflow.js");
 
-      // Verify that beads.ready is called with labelNone to exclude questions
+      // Verify that beads.ready is called with labelAll to only include workflow steps
       mockBeads.ready.mockReturnValue([
         {
           id: "bd-w001.1",
           title: "implementation",
           description: "Work context",
           parent: "bd-w001",
-          labels: ["agent:implementation"],
+          labels: ["agent:implementation", "whs:step"],
           status: "open",
         },
       ]);
 
       getReadyWorkflowSteps();
 
-      // The key assertion: beads.ready should be called with labelNone: ["whs:question"]
+      // The key assertion: beads.ready should be called with labelAll: ["whs:step"]
       expect(mockBeads.ready).toHaveBeenCalledWith(
         "/mock/orchestrator",
         expect.objectContaining({
           type: "task",
-          labelNone: ["whs:question"],
+          labelAll: ["whs:step"],
         })
       );
     });
