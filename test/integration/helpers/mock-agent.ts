@@ -269,3 +269,77 @@ export function errorResponse(
     error: errorMessage,
   };
 }
+
+/**
+ * Helper to create a response for a specific agent
+ */
+export function agentResponse(agent: string, handoff: Handoff): ScriptedResponse {
+  return {
+    match: (_prompt: string, matchAgent?: string) =>
+      matchAgent === agent || _prompt.toLowerCase().includes(agent.toLowerCase()),
+    output: `Completed ${agent} work. ${handoff.context.split("\n")[0]}`,
+    handoff,
+    costUsd: 0.05,
+  };
+}
+
+/**
+ * Configuration for a workflow step in a script
+ */
+export interface WorkflowScriptStep {
+  agent: string;
+  handoff: Handoff;
+  question?: {
+    questions: Question[];
+    context?: string;
+  };
+  error?: string;
+}
+
+/**
+ * Creates a sequence of scripted responses for a complete workflow
+ *
+ * Each step matches based on the agent name and produces the configured handoff.
+ * Steps are matched in order, allowing for the same agent to appear multiple times.
+ */
+export function workflowScript(steps: WorkflowScriptStep[]): ScriptedResponse[] {
+  const usedSteps = new Set<number>();
+
+  return steps.map((step, index) => ({
+    match: (_prompt: string, agent?: string) => {
+      // Check if this step hasn't been used and matches the agent
+      if (usedSteps.has(index)) return false;
+
+      const agentMatches =
+        agent === step.agent ||
+        _prompt.toLowerCase().includes(step.agent.toLowerCase());
+
+      if (agentMatches) {
+        usedSteps.add(index);
+        return true;
+      }
+      return false;
+    },
+    output: step.question
+      ? `I need some information for ${step.agent}.`
+      : `Completed ${step.agent} work. ${step.handoff.context.split("\n")[0]}`,
+    handoff: step.question ? undefined : step.handoff,
+    question: step.question,
+    error: step.error,
+    costUsd: 0.05,
+  }));
+}
+
+/**
+ * Gets the number of times the mock agent has been invoked
+ */
+export function getInvocationCount(): number {
+  return state.sessionCounter;
+}
+
+/**
+ * Gets all sessions that have been created
+ */
+export function getSessions(): Map<string, { lastPrompt: string; lastAgent?: string }> {
+  return new Map(state.sessions);
+}

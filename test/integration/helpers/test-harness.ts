@@ -9,8 +9,14 @@ import { mkdirSync, rmSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import { join, resolve } from "path";
 import { beads } from "../../../src/beads/index.js";
-import { initializeWhs, loadConfig } from "../../../src/config.js";
-import type { Config } from "../../../src/types.js";
+import { initializeWhs, loadConfig, addProject } from "../../../src/config.js";
+import { Dispatcher } from "../../../src/dispatcher.js";
+import type {
+  Config,
+  Notifier,
+  QuestionBeadData,
+  ActiveWork,
+} from "../../../src/types.js";
 
 /**
  * Test environment structure
@@ -192,5 +198,251 @@ export async function waitFor(
       throw new Error("Timeout waiting for condition");
     }
     await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+/**
+ * Notification event types for MockNotifier
+ */
+export interface QuestionNotification {
+  questionBeadId: string;
+  data: QuestionBeadData;
+}
+
+export interface ProgressNotification {
+  work: ActiveWork;
+  message: string;
+}
+
+export interface CompleteNotification {
+  work: ActiveWork;
+  result: "done" | "blocked";
+}
+
+export interface ErrorNotification {
+  work: ActiveWork;
+  error: Error;
+}
+
+/**
+ * Mock Notifier that captures all notifications for testing
+ */
+export class MockNotifier implements Notifier {
+  questions: QuestionNotification[] = [];
+  progressUpdates: ProgressNotification[] = [];
+  completions: CompleteNotification[] = [];
+  errors: ErrorNotification[] = [];
+  rateLimitErrors: Error[] = [];
+
+  async notifyQuestion(questionBeadId: string, data: QuestionBeadData): Promise<void> {
+    this.questions.push({ questionBeadId, data });
+  }
+
+  async notifyProgress(work: ActiveWork, message: string): Promise<void> {
+    this.progressUpdates.push({ work, message });
+  }
+
+  async notifyComplete(work: ActiveWork, result: "done" | "blocked"): Promise<void> {
+    this.completions.push({ work, result });
+  }
+
+  async notifyError(work: ActiveWork, error: Error): Promise<void> {
+    this.errors.push({ work, error });
+  }
+
+  async notifyRateLimit(error: Error): Promise<void> {
+    this.rateLimitErrors.push(error);
+  }
+
+  /**
+   * Resets all captured notifications
+   */
+  reset(): void {
+    this.questions = [];
+    this.progressUpdates = [];
+    this.completions = [];
+    this.errors = [];
+    this.rateLimitErrors = [];
+  }
+
+  /**
+   * Gets the last question notification
+   */
+  getLastQuestion(): QuestionNotification | undefined {
+    return this.questions[this.questions.length - 1];
+  }
+
+  /**
+   * Gets the last completion notification
+   */
+  getLastCompletion(): CompleteNotification | undefined {
+    return this.completions[this.completions.length - 1];
+  }
+}
+
+/**
+ * Extended test environment with dispatcher support
+ */
+export interface DispatcherTestEnvironment extends TestEnvironment {
+  /** Pre-configured dispatcher instance */
+  dispatcher: Dispatcher;
+  /** Mock notifier for capturing events */
+  notifier: MockNotifier;
+}
+
+/**
+ * Options for creating a dispatcher test environment
+ */
+export interface DispatcherTestEnvironmentOptions extends TestEnvironmentOptions {
+  /** Project name to add (defaults to "test-project") */
+  projectName?: string;
+  /** Base branch for the project (defaults to "main") */
+  baseBranch?: string;
+  /** Max concurrent total (defaults to 4) */
+  maxConcurrentTotal?: number;
+  /** Max concurrent per project (defaults to 2) */
+  maxConcurrentPerProject?: number;
+}
+
+/**
+ * Creates a test environment with a pre-configured dispatcher
+ *
+ * This sets up:
+ * - Orchestrator with beads initialized
+ * - Project with beads initialized
+ * - Project added to config
+ * - Dispatcher instance with MockNotifier
+ */
+export async function createDispatcherTestEnvironment(
+  testName: string,
+  options: DispatcherTestEnvironmentOptions = {}
+): Promise<DispatcherTestEnvironment> {
+  const {
+    projectName = "test-project",
+    baseBranch = "main",
+    maxConcurrentTotal = 4,
+    maxConcurrentPerProject = 2,
+    ...baseOptions
+  } = options;
+
+  // Create base test environment
+  const env = await createTestEnvironment(testName, {
+    initBeads: true,
+    initProjectBeads: true,
+    ...baseOptions,
+  });
+
+  // Add project to config
+  addProject(projectName, env.projectPath, {
+    baseBranch,
+  }, env.orchestratorPath);
+
+  // Create a git branch matching baseBranch in the project
+  try {
+    execSync(`git checkout -b ${baseBranch}`, { cwd: env.projectPath, stdio: "pipe" });
+  } catch {
+    // Branch might already exist
+    try {
+      execSync(`git checkout ${baseBranch}`, { cwd: env.projectPath, stdio: "pipe" });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Load config and create dispatcher
+  const config = loadConfig(env.orchestratorPath);
+
+  // Override concurrency settings for tests
+  config.concurrency.maxTotal = maxConcurrentTotal;
+  config.concurrency.maxPerProject = maxConcurrentPerProject;
+
+  const notifier = new MockNotifier();
+  const dispatcher = new Dispatcher(config, notifier);
+
+  // Create extended cleanup
+  const baseCleanup = env.cleanup;
+  const cleanup = async (): Promise<void> => {
+    // Stop dispatcher if running
+    try {
+      await dispatcher.stop();
+    } catch {
+      // Ignore
+    }
+    // Call base cleanup
+    await baseCleanup();
+  };
+
+  return {
+    ...env,
+    config,
+    dispatcher,
+    notifier,
+    cleanup,
+  };
+}
+
+/**
+ * Creates a workflow step bead for testing
+ */
+export function createWorkflowStep(
+  env: TestEnvironment,
+  epicId: string,
+  agent: string,
+  options: {
+    description?: string;
+    status?: "open" | "in_progress" | "closed";
+    labels?: string[];
+  } = {}
+): string {
+  const bead = beads.create(agent, env.orchestratorPath, {
+    type: "task",
+    parent: epicId,
+    description: options.description,
+    labels: [`agent:${agent}`, ...(options.labels || [])],
+  });
+
+  if (options.status && options.status !== "open") {
+    beads.update(bead.id, env.orchestratorPath, { status: options.status });
+  }
+
+  return bead.id;
+}
+
+/**
+ * Creates a workflow epic bead for testing
+ */
+export function createWorkflowEpic(
+  env: TestEnvironment,
+  project: string,
+  sourceBeadId: string,
+  title: string,
+  options: {
+    description?: string;
+    status?: "open" | "in_progress" | "blocked" | "closed";
+    labels?: string[];
+  } = {}
+): string {
+  const bead = beads.create(`${project}:${sourceBeadId} - ${title}`, env.orchestratorPath, {
+    type: "epic",
+    description: options.description || `Source: ${project}/${sourceBeadId}`,
+    labels: [`project:${project}`, `source:${sourceBeadId}`, ...(options.labels || [])],
+  });
+
+  if (options.status && options.status !== "open") {
+    beads.update(bead.id, env.orchestratorPath, { status: options.status });
+  }
+
+  return bead.id;
+}
+
+/**
+ * Checks if worktrunk (wt) CLI is installed
+ */
+export function isWorktrunkInstalled(): boolean {
+  try {
+    execSync("wt --version", { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
   }
 }
