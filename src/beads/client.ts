@@ -92,6 +92,8 @@ export class BeadsClient {
     // --label (or -l) is the AND filter in beads CLI
     if (options?.labelAll?.length) args.push("--label", options.labelAll.join(","));
     if (options?.labelNone?.length) args.push("--label-none", options.labelNone.join(","));
+    if (options?.sort) args.push("--sort", options.sort);
+    if (options?.reverse) args.push("--reverse");
 
     const raw = this.exec(args, cwd) as RawBead[];
     return raw.map(normalizeBead);
@@ -361,9 +363,14 @@ export class BeadsClient {
    * List pending (open) questions in the orchestrator
    *
    * Questions are identified by the "whs:question" label.
+   * Returns questions sorted by created date (oldest first).
    */
   listPendingQuestions(cwd: string): Bead[] {
-    return this.list(cwd, { status: "open", labelAll: ["whs:question"] });
+    return this.list(cwd, {
+      status: "open",
+      labelAll: ["whs:question"],
+      sort: "created",
+    });
   }
 
   /**

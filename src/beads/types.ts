@@ -86,4 +86,6 @@ export interface BeadListOptions {
   labelAny?: string[];
   labelAll?: string[];
   labelNone?: string[];
+  sort?: "priority" | "created" | "updated" | "closed" | "status" | "id" | "title" | "type";
+  reverse?: boolean;
 }

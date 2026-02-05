@@ -790,6 +790,101 @@ program
   });
 
 program
+  .command("chat")
+  .description("Interactive mode for answering dispatcher questions")
+  .option("-i, --interval <ms>", "Poll interval when idle (ms)", "3000")
+  .action(async (options) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { createInterface } = await import("readline");
+    const {
+      getOldestQuestion,
+      formatQuestionForDisplay,
+      submitAnswer,
+    } = await import("./questions.js");
+
+    const pollInterval = parseInt(options.interval, 10) || 3000;
+
+    console.log("\n  While Humans Sleep - Chat Mode");
+    console.log("   Watching for questions... (Ctrl+C to exit)\n");
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const ask = (prompt: string): Promise<string> => {
+      return new Promise((resolve) => {
+        rl.question(prompt, (answer) => resolve(answer.trim()));
+      });
+    };
+
+    // Sleep helper
+    const sleep = (ms: number): Promise<void> => {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    };
+
+    // Handle Ctrl+C gracefully
+    let running = true;
+    process.on("SIGINT", () => {
+      running = false;
+      console.log("\n\n   Exiting chat mode.\n");
+      rl.close();
+      process.exit(0);
+    });
+
+    const separator = "-".repeat(60);
+
+    while (running) {
+      const question = getOldestQuestion();
+
+      if (!question) {
+        process.stdout.write("\r   No pending questions. Waiting...  ");
+        await sleep(pollInterval);
+        continue;
+      }
+
+      // Clear waiting message and show question
+      process.stdout.write("\r" + " ".repeat(50) + "\r");
+      console.log(separator + "\n");
+      console.log(formatQuestionForDisplay(question));
+      console.log("");
+
+      const answer = await ask("Your answer: ");
+
+      if (!answer) {
+        console.log("   (Skipped - no answer provided)\n");
+        continue;
+      }
+
+      console.log("\n   Answer submitted. Resuming agent...");
+
+      const result = await submitAnswer(question.beadId, answer);
+
+      if (!result.success) {
+        console.log(`   Error: ${result.error}\n`);
+        continue;
+      }
+
+      if (result.handoff) {
+        if (result.handoff.next_agent === "DONE") {
+          console.log("   Workflow complete!\n");
+        } else if (result.handoff.next_agent === "BLOCKED") {
+          console.log("   Workflow blocked.\n");
+        } else {
+          console.log(`   Handoff to: ${result.handoff.next_agent}\n`);
+        }
+      }
+
+      console.log(separator + "\n");
+    }
+
+    rl.close();
+  });
+
+program
   .command("questions")
   .description("List pending questions")
   .action(() => {
