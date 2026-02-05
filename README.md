@@ -44,7 +44,11 @@ You wake up: Feature complete, PR merged ✓
 - Node.js 20+
 - [Beads CLI](https://github.com/steveyegge/beads) installed (`npm install -g @beads/bd`)
 - [Worktrunk](https://worktrunk.dev/) for worktree management
-- Claude API access (via Claude Agent SDK)
+- **Anthropic API key** — The Claude Agent SDK requires an API key from the [Anthropic Console](https://console.anthropic.com/). Set it in your environment:
+  ```bash
+  export ANTHROPIC_API_KEY="sk-ant-..."
+  ```
+  Note: Claude subscription auth (Pro/Max) is NOT supported by the SDK.
 
 ### Installation
 
@@ -62,7 +66,7 @@ npm link
 ### Setup
 
 ```bash
-# 1. Initialize WHS (run once)
+# 1. Initialize WHS (includes Claude authentication setup)
 whs init
 
 # 2. Add a project
@@ -92,6 +96,22 @@ This creates:
 - `~/.whs/config.json` — Configuration file
 - Orchestrator directory with git + beads initialized
 - Beads daemon running with sync-branch configured
+
+### `whs claude-login`
+
+Set up Claude authentication for WHS agents. This is automatically run during `whs init`, but you can run it again to change authentication.
+
+```bash
+whs claude-login                            # Interactive setup (choose OAuth or API key)
+whs claude-login --api-key sk-ant-api...    # Use an Anthropic API key directly
+whs claude-login --oauth-token sk-ant-oa... # Use an OAuth token directly
+```
+
+**Authentication options:**
+- **OAuth token** (recommended) — Uses your Claude subscription. Run `claude setup-token`, authenticate in browser, paste the token.
+- **API key** — Pay-per-use from [console.anthropic.com](https://console.anthropic.com/)
+
+Credentials are saved to `.whs/.env` and automatically loaded by WHS agents.
 
 ### `whs add <name> <path>`
 
@@ -425,6 +445,20 @@ docs/
 - [CLAUDE.md](CLAUDE.md) — Guidelines for AI agents working on this project
 
 ## Troubleshooting
+
+### "Invalid API key" or "apiKeySource: none"
+
+The Claude Agent SDK requires an API key from the [Anthropic Console](https://console.anthropic.com/), not a Claude subscription (Pro/Max).
+
+```bash
+# Set your API key (get one from console.anthropic.com)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Then start the dispatcher
+whs start
+```
+
+Add the export to your shell profile (`~/.zshrc` or `~/.bashrc`) for persistence.
 
 ### "No projects configured"
 

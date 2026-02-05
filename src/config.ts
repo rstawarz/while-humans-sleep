@@ -335,6 +335,61 @@ export function expandPath(path: string): string {
 }
 
 /**
+ * Loads environment variables from the WHS .env file
+ *
+ * This loads ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN from ~/.whs/.env
+ * and returns them merged with process.env.
+ *
+ * @param startDir - Directory to start searching for config (defaults to cwd)
+ * @returns Environment object with WHS credentials merged in
+ */
+export function loadWhsEnv(startDir?: string): Record<string, string | undefined> {
+  const configDir = findConfigDir(startDir);
+  if (!configDir) {
+    return { ...process.env };
+  }
+
+  const envPath = join(configDir, ".env");
+  if (!existsSync(envPath)) {
+    return { ...process.env };
+  }
+
+  try {
+    const envContent = readFileSync(envPath, "utf-8");
+    const envVars: Record<string, string> = {};
+
+    // Parse .env file (simple KEY=value format)
+    for (const line of envContent.split("\n")) {
+      const trimmed = line.trim();
+      // Skip comments and empty lines
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const eqIndex = trimmed.indexOf("=");
+      if (eqIndex > 0) {
+        const key = trimmed.slice(0, eqIndex).trim();
+        let value = trimmed.slice(eqIndex + 1).trim();
+
+        // Remove quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+
+        envVars[key] = value;
+      }
+    }
+
+    // Merge with process.env (WHS .env takes precedence for auth vars)
+    return {
+      ...process.env,
+      ...envVars,
+    };
+  } catch {
+    return { ...process.env };
+  }
+}
+
+/**
  * Checks if WHS has been initialized in the current directory tree
  *
  * @param startDir - Directory to start searching from (defaults to cwd)

@@ -557,3 +557,103 @@ describe("initializeWhs behavior", () => {
     expect(loaded.orchestratorPath).toBe("/orch");
   });
 });
+
+// Import loadWhsEnv for testing
+import { loadWhsEnv } from "./config.js";
+
+describe("loadWhsEnv", () => {
+  const TEST_DIR = join(tmpdir(), `whs-env-test-${process.pid}-${Date.now()}`);
+  const WHS_DIR = join(TEST_DIR, ".whs");
+  const ENV_PATH = join(WHS_DIR, ".env");
+
+  beforeEach(() => {
+    mkdirSync(WHS_DIR, { recursive: true });
+    // Create a minimal config.json so findConfigDir works
+    writeFileSync(
+      join(WHS_DIR, "config.json"),
+      JSON.stringify({ projects: [], orchestratorPath: TEST_DIR, concurrency: { maxTotal: 4, maxPerProject: 2 }, notifier: "cli" })
+    );
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+  });
+
+  it("returns process.env when no .env file exists", () => {
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.PATH).toBe(process.env.PATH);
+  });
+
+  it("loads ANTHROPIC_API_KEY from .env", () => {
+    writeFileSync(ENV_PATH, "ANTHROPIC_API_KEY=sk-ant-test123\n");
+
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test123");
+  });
+
+  it("loads CLAUDE_CODE_OAUTH_TOKEN from .env", () => {
+    writeFileSync(ENV_PATH, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oa-test456\n");
+
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oa-test456");
+  });
+
+  it("skips comments and empty lines", () => {
+    writeFileSync(
+      ENV_PATH,
+      `# This is a comment
+ANTHROPIC_API_KEY=sk-ant-test123
+
+# Another comment
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oa-test456
+`
+    );
+
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test123");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oa-test456");
+  });
+
+  it("handles quoted values", () => {
+    writeFileSync(
+      ENV_PATH,
+      `API_KEY_DOUBLE="double-quoted"
+API_KEY_SINGLE='single-quoted'
+API_KEY_UNQUOTED=unquoted
+`
+    );
+
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.API_KEY_DOUBLE).toBe("double-quoted");
+    expect(env.API_KEY_SINGLE).toBe("single-quoted");
+    expect(env.API_KEY_UNQUOTED).toBe("unquoted");
+  });
+
+  it("WHS .env takes precedence over process.env for auth vars", () => {
+    // Temporarily set process.env
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "from-process-env";
+
+    writeFileSync(ENV_PATH, "ANTHROPIC_API_KEY=from-whs-env\n");
+
+    const env = loadWhsEnv(TEST_DIR);
+    expect(env.ANTHROPIC_API_KEY).toBe("from-whs-env");
+
+    // Restore
+    if (originalKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = originalKey;
+    }
+  });
+
+  it("preserves other process.env variables", () => {
+    writeFileSync(ENV_PATH, "ANTHROPIC_API_KEY=test\n");
+
+    const env = loadWhsEnv(TEST_DIR);
+    // PATH should come from process.env
+    expect(env.PATH).toBe(process.env.PATH);
+  });
+});

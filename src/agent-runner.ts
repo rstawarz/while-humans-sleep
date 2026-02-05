@@ -8,6 +8,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Question } from "./types.js";
 import { recordStepComplete } from "./metrics.js";
+import { loadWhsEnv } from "./config.js";
 import { resolve, relative, isAbsolute } from "path";
 
 // Re-export SDK types we need
@@ -220,10 +221,15 @@ export async function runAgent(
     // Build hooks if safety is enabled
     const hooks = options.enableSafetyHooks !== false ? buildHooks(options.cwd) : undefined;
 
+    // Load environment with WHS credentials (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)
+    const env = loadWhsEnv(options.cwd);
+
     const queryOptions: Parameters<typeof query>[0]["options"] = {
       cwd: options.cwd,
-      // Load project's CLAUDE.md and settings
-      settingSources: ["project"],
+      // Pass environment with WHS credentials
+      env,
+      // Load user settings (for credentials) and project settings (CLAUDE.md)
+      settingSources: ["user", "project"],
       // Use Claude Code's system prompt as base, append custom if provided
       systemPrompt: options.systemPrompt
         ? { type: "preset", preset: "claude_code", append: options.systemPrompt }
@@ -254,6 +260,14 @@ export async function runAgent(
           break;
 
         case "assistant":
+          // Check for authentication/API errors on the message itself
+          // The SDK can return error: "authentication_failed" etc. on assistant messages
+          if (message.error) {
+            success = false;
+            error = `SDK error: ${message.error}`;
+            // Don't break - continue to extract any text for debugging
+          }
+
           // Extract text content from assistant messages
           if (message.message?.content) {
             for (const block of message.message.content) {
@@ -301,14 +315,8 @@ export async function runAgent(
     }
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);
-    // SDK sometimes throws "process exited with code 1" after a successful query
-    // If we already received a success result, ignore this spurious error
-    if (success && errMessage.includes("process exited")) {
-      // Ignore - we already have a successful result
-    } else {
-      success = false;
-      error = errMessage;
-    }
+    success = false;
+    error = errMessage;
   }
 
   // Record metrics if context provided
