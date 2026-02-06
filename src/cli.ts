@@ -699,6 +699,130 @@ program
   });
 
 program
+  .command("import <file>")
+  .description("Import stories from a planning document")
+  .option("-P, --project <name>", "Project name (inferred from cwd if omitted)")
+  .option("--dry-run", "Show what would be created without creating anything")
+  .action(async (file, options) => {
+    const { readFileSync } = await import("fs");
+    const { parseAndValidatePlan } = await import("./plan-parser.js");
+
+    // Determine project (from flag or infer from cwd)
+    let projectName = options.project;
+    let project = projectName ? getProject(projectName) : null;
+
+    if (!project) {
+      // Try to infer from current directory
+      const cwd = process.cwd();
+      const config = loadConfig();
+
+      for (const p of config.projects) {
+        const projectPath = expandPath(p.repoPath);
+        if (cwd === projectPath || cwd.startsWith(projectPath + "/")) {
+          project = p;
+          projectName = p.name;
+          break;
+        }
+      }
+    }
+
+    if (!project) {
+      console.error("Error: Could not determine project");
+      console.error("Either run from within a project directory or use --project <name>");
+      console.error("\nAvailable projects:");
+      for (const name of listProjects()) {
+        console.error(`  - ${name}`);
+      }
+      process.exit(1);
+    }
+
+    // Read and parse the file
+    const filePath = resolve(file);
+    if (!existsSync(filePath)) {
+      console.error(`Error: File not found: ${filePath}`);
+      process.exit(1);
+    }
+
+    const content = readFileSync(filePath, "utf-8");
+    const plan = parseAndValidatePlan(content);
+
+    // Report any parsing errors
+    if (plan.errors.length > 0) {
+      console.error("Errors in planning document:");
+      for (const error of plan.errors) {
+        console.error(`  - ${error}`);
+      }
+      process.exit(1);
+    }
+
+    if (plan.epics.length === 0) {
+      console.error("Error: No epics found in document");
+      console.error("Make sure your document has `# Epic: Title` headers");
+      process.exit(1);
+    }
+
+    // Show what will be created
+    console.log(`\n📋 Importing from: ${file}`);
+    console.log(`   Project: ${projectName}`);
+    console.log("");
+
+    for (const epic of plan.epics) {
+      console.log(`Epic: ${epic.title}`);
+      for (const story of epic.stories) {
+        const deps = story.dependsOn.length > 0 ? ` (depends on: ${story.dependsOn.join(", ")})` : "";
+        console.log(`  - [P${story.priority}] ${story.title}${deps}`);
+      }
+      console.log("");
+    }
+
+    if (options.dryRun) {
+      console.log("(dry run - nothing created)");
+      return;
+    }
+
+    // Create the beads
+    const projectPath = expandPath(project.repoPath);
+    const createdBeads: Map<string, string> = new Map(); // title -> beadId
+
+    for (const epic of plan.epics) {
+      // Create epic
+      const epicBead = beads.create(epic.title, projectPath, {
+        type: "epic",
+        priority: 2,
+        description: epic.description,
+        labels: ["whs"],
+      });
+      console.log(`✓ Created epic: ${epicBead.id} - ${epic.title}`);
+
+      // Create stories
+      for (const story of epic.stories) {
+        const storyBead = beads.create(story.title, projectPath, {
+          type: story.type,
+          priority: story.priority,
+          parent: epicBead.id,
+          description: story.description,
+          labels: ["whs"],
+        });
+        createdBeads.set(story.title.toLowerCase(), storyBead.id);
+        console.log(`  ✓ Created ${story.type}: ${storyBead.id} - ${story.title}`);
+
+        // Add dependencies
+        for (const depTitle of story.dependsOn) {
+          const depId = createdBeads.get(depTitle.toLowerCase());
+          if (depId) {
+            beads.depAdd(storyBead.id, depId, projectPath);
+            console.log(`    → Depends on: ${depId}`);
+          }
+        }
+      }
+    }
+
+    const totalStories = plan.epics.reduce((sum, e) => sum + e.stories.length, 0);
+    console.log(`\n✅ Imported ${plan.epics.length} epic(s) with ${totalStories} stories`);
+    console.log(`\nView in ${projectName}: cd ${expandPath(project.repoPath)} && bd list`);
+  });
+
+program
   .command("answer <questionId> <answer>")
   .description("Answer a pending question (dispatcher will resume agent)")
   .action(async (questionId, answer) => {
