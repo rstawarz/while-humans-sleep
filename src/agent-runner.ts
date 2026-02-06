@@ -177,6 +177,26 @@ export interface RunAgentOptions {
 }
 
 /**
+ * Auth error patterns to detect
+ */
+const AUTH_ERROR_PATTERNS = [
+  /invalid api key/i,
+  /authentication[_\s]?failed/i,
+  /please run \/login/i,
+  /unauthorized/i,
+  /api key.*invalid/i,
+  /token.*expired/i,
+  /oauth.*error/i,
+];
+
+/**
+ * Checks if an error or output indicates an auth failure
+ */
+export function isAuthenticationError(text: string): boolean {
+  return AUTH_ERROR_PATTERNS.some(pattern => pattern.test(text));
+}
+
+/**
  * Result of running an agent
  */
 export interface AgentRunResult {
@@ -194,6 +214,8 @@ export interface AgentRunResult {
   success: boolean;
   /** Error message if failed */
   error?: string;
+  /** Whether the error was an authentication failure (requires human intervention) */
+  isAuthError?: boolean;
   /** Pending question if agent asked for user input */
   pendingQuestion?: {
     questions: Question[];
@@ -331,6 +353,9 @@ export async function runAgent(
     }
   }
 
+  // Check for auth errors in output or error message
+  const isAuthError = isAuthenticationError(output) || (error ? isAuthenticationError(error) : false);
+
   return {
     sessionId,
     output: output.trim(),
@@ -339,6 +364,7 @@ export async function runAgent(
     durationMs,
     success,
     error,
+    isAuthError,
     pendingQuestion,
   };
 }

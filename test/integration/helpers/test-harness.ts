@@ -8,7 +8,7 @@
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import { join, resolve } from "path";
-import { beads } from "../../../src/beads/index.js";
+import { beads, BeadsClient } from "../../../src/beads/index.js";
 import { initializeWhs, loadConfig, addProject } from "../../../src/config.js";
 import { Dispatcher } from "../../../src/dispatcher.js";
 import type {
@@ -123,6 +123,10 @@ export async function createTestEnvironment(
     if (existsSync(basePath)) {
       rmSync(basePath, { recursive: true, force: true });
     }
+
+    // Clean stale entries from the global beads registry
+    // This prevents the registry from accumulating test fixture entries
+    BeadsClient.cleanRegistry();
   };
 
   return {

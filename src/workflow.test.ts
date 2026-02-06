@@ -26,6 +26,13 @@ vi.mock("./config.js", () => ({
     notifier: "cli",
   })),
   expandPath: vi.fn((path: string) => path),
+  getProject: vi.fn((name: string) => ({
+    name,
+    repoPath: `/mock/projects/${name}`,
+    baseBranch: "main",
+    agentsPath: "docs/llm/agents",
+    beadsMode: "committed",
+  })),
 }));
 
 describe("getFirstAgent", () => {
@@ -124,6 +131,13 @@ describe("workflow functions with mocked beads", () => {
           parent: "bd-w001",
           labels: ["agent:implementation", "whs:step"],
         })
+      );
+
+      // Verify source bead is marked as in_progress
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-src",
+        "/mock/projects/test",
+        { status: "in_progress" }
       );
     });
   });

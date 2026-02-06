@@ -7,7 +7,7 @@
  */
 
 import { beads } from "./beads/index.js";
-import { loadConfig, expandPath } from "./config.js";
+import { loadConfig, expandPath, getProject } from "./config.js";
 import type { WorkItem, Handoff } from "./types.js";
 import type { Bead } from "./beads/types.js";
 
@@ -56,6 +56,13 @@ export async function startWorkflow(
   firstAgent: string = "implementation"
 ): Promise<{ epicId: string; stepId: string }> {
   const orchestratorPath = getOrchestratorPath();
+
+  // Mark source bead as in_progress to prevent duplicate workflows
+  const projectConfig = getProject(project);
+  if (projectConfig) {
+    const projectPath = expandPath(projectConfig.repoPath);
+    beads.update(sourceBead.id, projectPath, { status: "in_progress" });
+  }
 
   // Create workflow epic
   const epicTitle = `${project}:${sourceBead.id} - ${sourceBead.title}`;

@@ -398,6 +398,43 @@ export class BeadsClient {
   private escapeQuotes(str: string): string {
     return str.replace(/"/g, '\\"');
   }
+
+  /**
+   * Clean stale entries from the global beads registry
+   *
+   * The beads CLI stores all initialized workspaces in ~/.beads/registry.json.
+   * This method removes entries for directories that no longer exist.
+   * Useful for cleaning up after tests or deleted projects.
+   */
+  static cleanRegistry(): number {
+    const homedir = process.env.HOME || process.env.USERPROFILE || "";
+    const registryPath = `${homedir}/.beads/registry.json`;
+
+    try {
+      const fs = require("fs");
+      if (!fs.existsSync(registryPath)) {
+        return 0;
+      }
+
+      const content = fs.readFileSync(registryPath, "utf-8");
+      const entries = JSON.parse(content);
+
+      const validEntries = entries.filter((entry: { workspace_path: string }) => {
+        return fs.existsSync(entry.workspace_path);
+      });
+
+      const removed = entries.length - validEntries.length;
+
+      if (removed > 0) {
+        fs.writeFileSync(registryPath, JSON.stringify(validEntries, null, 2));
+      }
+
+      return removed;
+    } catch {
+      // Ignore errors - registry cleanup is best-effort
+      return 0;
+    }
+  }
 }
 
 // Export singleton instance for convenience

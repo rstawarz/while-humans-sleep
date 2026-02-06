@@ -541,6 +541,12 @@ export class Dispatcher {
         costSoFar: work.costSoFar + result.costUsd,
       });
 
+      // Check for authentication errors - these require human intervention
+      if (result.isAuthError) {
+        await this.handleAuthError(work, result.error || "Authentication failed");
+        return;
+      }
+
       // Check for pending question
       if (result.pendingQuestion) {
         await this.handlePendingQuestion(work, result);
@@ -592,6 +598,12 @@ export class Dispatcher {
         sessionId: result.sessionId,
         costSoFar: work.costSoFar + result.costUsd,
       });
+
+      // Check for authentication errors - these require human intervention
+      if (result.isAuthError) {
+        await this.handleAuthError(work, result.error || "Authentication failed");
+        return;
+      }
 
       // Check for another pending question
       if (result.pendingQuestion) {
@@ -743,6 +755,34 @@ export class Dispatcher {
     completeWorkflow(work.workflowEpicId, "blocked", reason);
     await this.notifier.notifyComplete(work, "blocked");
     console.log(`🚫 Workflow blocked: ${work.workItem.project}/${work.workItem.id} - ${reason}`);
+  }
+
+  /**
+   * Handles an authentication error - stops the dispatcher entirely
+   *
+   * Auth errors require human intervention (re-login, API key refresh)
+   * so we stop all work and notify loudly.
+   */
+  private async handleAuthError(work: ActiveWork, message: string): Promise<void> {
+    console.error("\n" + "=".repeat(60));
+    console.error("🔐 AUTHENTICATION ERROR - STOPPING DISPATCHER");
+    console.error("=".repeat(60));
+    console.error(`\nError: ${message}`);
+    console.error("\nAll agents have been stopped. Please fix authentication:");
+    console.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
+    console.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
+    console.error("\nThen restart the dispatcher with 'whs start'");
+    console.error("=".repeat(60) + "\n");
+
+    // Notify about the auth error
+    await this.notifier.notifyError(work, new Error(`Authentication failed: ${message}`));
+
+    // Mark current work as blocked
+    await this.markWorkflowBlocked(work, `Authentication error: ${message}`);
+    this.state = removeActiveWork(this.state, work.workItem.id);
+
+    // Stop the dispatcher entirely - auth errors affect all agents
+    await this.stop();
   }
 
   /**

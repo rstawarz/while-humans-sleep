@@ -29,8 +29,47 @@ function createDefaultConfig(orchestratorPath: string): Config {
 }
 
 /**
+ * Project pointer config - stored in project's .whs/config.json
+ * Points back to the orchestrator
+ */
+interface ProjectPointerConfig {
+  orchestratorPath: string;
+}
+
+/**
+ * Checks if a config file is a project pointer (vs full orchestrator config)
+ */
+function isProjectPointer(config: unknown): config is ProjectPointerConfig {
+  return (
+    typeof config === "object" &&
+    config !== null &&
+    "orchestratorPath" in config &&
+    !("projects" in config)
+  );
+}
+
+/**
+ * Creates a project pointer config in the project's .whs/ directory
+ */
+export function createProjectPointer(projectPath: string, orchestratorPath: string): void {
+  const whsDir = join(projectPath, WHS_FOLDER);
+  const configPath = join(whsDir, CONFIG_FILE);
+
+  if (!existsSync(whsDir)) {
+    mkdirSync(whsDir, { recursive: true });
+  }
+
+  const pointer: ProjectPointerConfig = {
+    orchestratorPath: resolve(orchestratorPath),
+  };
+
+  writeFileSync(configPath, JSON.stringify(pointer, null, 2) + "\n", "utf-8");
+}
+
+/**
  * Finds the WHS config directory by walking up from startDir.
- * Returns null if not in a WHS orchestrator.
+ * If a project pointer is found, follows it to the orchestrator.
+ * Returns null if not in a WHS orchestrator or project.
  */
 export function findConfigDir(startDir: string = process.cwd()): string | null {
   let dir = resolve(startDir);
@@ -38,9 +77,30 @@ export function findConfigDir(startDir: string = process.cwd()): string | null {
 
   while (dir !== root) {
     const whsDir = join(dir, WHS_FOLDER);
-    if (existsSync(join(whsDir, CONFIG_FILE))) {
-      return whsDir;
+    const configPath = join(whsDir, CONFIG_FILE);
+
+    if (existsSync(configPath)) {
+      // Check if this is a project pointer or the actual orchestrator
+      try {
+        const content = readFileSync(configPath, "utf-8");
+        const parsed = JSON.parse(content);
+
+        if (isProjectPointer(parsed)) {
+          // Follow the pointer to the orchestrator
+          const orchestratorConfigDir = join(parsed.orchestratorPath, WHS_FOLDER);
+          if (existsSync(join(orchestratorConfigDir, CONFIG_FILE))) {
+            return orchestratorConfigDir;
+          }
+          // Pointer is stale/invalid, continue searching
+        } else {
+          // This is the orchestrator config
+          return whsDir;
+        }
+      } catch {
+        // Invalid JSON, continue searching
+      }
     }
+
     const parent = dirname(dir);
     if (parent === dir) break; // Reached root
     dir = parent;
@@ -197,9 +257,11 @@ export function addProject(
     return false;
   }
 
+  const resolvedRepoPath = expandPath(repoPath);
+
   const project: Project = {
     name,
-    repoPath: expandPath(repoPath),
+    repoPath: resolvedRepoPath,
     baseBranch: options.baseBranch ?? "main",
     agentsPath: options.agentsPath ?? "docs/llm/agents",
     beadsMode: options.beadsMode ?? "committed",
@@ -207,6 +269,10 @@ export function addProject(
 
   config.projects.push(project);
   saveConfig(config, startDir);
+
+  // Create a pointer in the project's .whs/ so commands work from the project directory
+  createProjectPointer(resolvedRepoPath, config.orchestratorPath);
+
   return true;
 }
 

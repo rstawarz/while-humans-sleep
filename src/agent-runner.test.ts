@@ -5,6 +5,7 @@ import {
   escapesWorktree,
   validateCommand,
   validateFilePath,
+  isAuthenticationError,
   DANGEROUS_COMMAND_PATTERNS,
 } from "./agent-runner.js";
 
@@ -194,6 +195,40 @@ describe("escapesWorktree", () => {
   it("allows absolute paths within worktree", () => {
     expect(escapesWorktree(`${worktree}/src/file.ts`, worktree)).toBe(false);
     expect(escapesWorktree(`${worktree}/package.json`, worktree)).toBe(false);
+  });
+});
+
+describe("isAuthenticationError", () => {
+  it("detects invalid API key message", () => {
+    expect(isAuthenticationError("Invalid API key · Please run /login")).toBe(true);
+    expect(isAuthenticationError("Error: invalid api key")).toBe(true);
+    expect(isAuthenticationError("API key is invalid")).toBe(true);
+  });
+
+  it("detects authentication failed messages", () => {
+    expect(isAuthenticationError("authentication_failed")).toBe(true);
+    expect(isAuthenticationError("Authentication failed")).toBe(true);
+  });
+
+  it("detects token expired messages", () => {
+    expect(isAuthenticationError("token expired")).toBe(true);
+    expect(isAuthenticationError("OAuth token has expired")).toBe(true);
+  });
+
+  it("detects unauthorized messages", () => {
+    expect(isAuthenticationError("Unauthorized")).toBe(true);
+    expect(isAuthenticationError("401 Unauthorized")).toBe(true);
+  });
+
+  it("returns false for normal errors", () => {
+    expect(isAuthenticationError("File not found")).toBe(false);
+    expect(isAuthenticationError("npm ERR! code ENOENT")).toBe(false);
+    expect(isAuthenticationError("Connection timeout")).toBe(false);
+  });
+
+  it("returns false for normal output", () => {
+    expect(isAuthenticationError("Build completed successfully")).toBe(false);
+    expect(isAuthenticationError("All tests passed")).toBe(false);
   });
 });
 
