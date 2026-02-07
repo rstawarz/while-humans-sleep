@@ -43,6 +43,25 @@ for await (const message of query(prompt, {
 
 **Important:** Must set `settingSources: ["project"]` to load each project's CLAUDE.md and .claude/settings.json.
 
+#### Agent Runner Abstraction
+
+The dispatcher uses an `AgentRunner` interface to abstract agent execution:
+
+```typescript
+interface AgentRunner {
+  run(options: AgentRunOptions): Promise<AgentRunResult>;
+  resumeWithAnswer(sessionId: string, answer: string, options): Promise<AgentRunResult>;
+}
+```
+
+**Available implementations:**
+- `CLIAgentRunner` - Uses `claude` CLI (runs on Max subscription, no API costs)
+- `ClaudeSdkAgentRunner` - Uses Claude Agent SDK (requires API key, pay-per-token)
+
+**Future provider support:**
+- **OpenAI Assistants API** - Could implement `AgentRunner` (similar abstraction with threads, tools, streaming)
+- **Google Gemini** - Would need custom agent loop wrapper (no native agent SDK)
+
 ### 2. Beads for Task Management
 
 Each project uses Beads (https://github.com/steveyegge/beads) for its task backlog:
