@@ -178,6 +178,29 @@ program
       console.warn(`  orchestrator: daemon error - ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // Check worktree hook approvals
+    const { hasWtConfig, checkHookApprovals } = await import("./worktree-hooks.js");
+    let hasUnapprovedHooks = false;
+    const projectsWithHooks = config.projects.filter((p) => hasWtConfig(expandPath(p.repoPath)));
+    if (projectsWithHooks.length > 0) {
+      console.log("Checking worktree hooks...");
+      for (const project of projectsWithHooks) {
+        const projectPath = expandPath(project.repoPath);
+        const status = checkHookApprovals(projectPath);
+        if (status.allApproved) {
+          console.log(`  ${project.name}: ${status.hasConfig ? "hooks approved" : "no hooks"}`);
+        } else {
+          hasUnapprovedHooks = true;
+          console.warn(`  ${project.name}: ${status.unapprovedCount} unapproved hook(s)`);
+        }
+      }
+      if (hasUnapprovedHooks) {
+        console.warn("");
+        console.warn("  ⚠  Unapproved hooks will fail when creating worktrees.");
+        console.warn("  Run in each project: wt hook approvals add");
+      }
+    }
+
     console.log("");
 
     // Set up notifier (CLI or Telegram)
@@ -535,6 +558,51 @@ program
         console.log("  ✓ Daemon running with sync-branch");
       } catch (err) {
         console.warn(`  ⚠ Could not start daemon: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Worktree hooks setup
+      if (!options.yes) {
+        const { hasWtConfig, analyzeProjectForHooks, formatHooksAsToml, writeWtConfig } =
+          await import("./worktree-hooks.js");
+
+        if (!hasWtConfig(resolvedPath)) {
+          console.log("");
+          console.log("  Worktree Setup");
+          console.log("  WHS uses git worktrees to isolate agent work. Projects often need");
+          console.log("  setup hooks (dependency install, database creation, env files) to");
+          console.log("  ensure each worktree is ready for agents.");
+          console.log("");
+
+          const setupHooks = await ask("  Analyze project and suggest worktree hooks? (y/N): ");
+          if (setupHooks.toLowerCase() === "y" || setupHooks.toLowerCase() === "yes") {
+            try {
+              console.log("\n  Analyzing project...");
+              const { createAgentRunner } = await import("./agent-runner-factory.js");
+              const runner = createAgentRunner(loadConfig().runnerType);
+              const hooks = await analyzeProjectForHooks(resolvedPath, runner);
+              const toml = formatHooksAsToml(hooks);
+
+              console.log("\n  Suggested .config/wt.toml:\n");
+              for (const line of toml.split("\n")) {
+                console.log(`    ${line}`);
+              }
+              console.log("");
+
+              const writeIt = await ask("  Write this config? (Y/n): ");
+              if (writeIt.toLowerCase() !== "n" && writeIt.toLowerCase() !== "no") {
+                writeWtConfig(resolvedPath, toml);
+                console.log("  ✓ Written to .config/wt.toml");
+              } else {
+                console.log("  Skipped. Run 'whs setup hooks' later to set up hooks.");
+              }
+            } catch (err) {
+              console.warn(`  ⚠ Hook analysis failed: ${err instanceof Error ? err.message : String(err)}`);
+              console.log("  You can run 'whs setup hooks' later to set up hooks.");
+            }
+          } else {
+            console.log("  Skipped. Run 'whs setup hooks' later to set up hooks.");
+          }
+        }
       }
 
       // Add project to config
@@ -1205,6 +1273,121 @@ program
     console.log(`  Max per project: ${config.concurrency.maxPerProject}`);
     console.log(`  Notifier: ${config.notifier}`);
     console.log(`  Projects: ${config.projects.length}`);
+  });
+
+// Setup subcommand
+const setupCmd = program
+  .command("setup")
+  .description("Setup commands for project configuration");
+
+setupCmd
+  .command("hooks [project]")
+  .description("Analyze project and suggest worktrunk worktree hooks")
+  .option("--write", "Write config without prompting")
+  .action(async (projectName: string | undefined, options: { write?: boolean }) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+
+    // Resolve project
+    let project = projectName ? getProject(projectName) : null;
+
+    if (!project) {
+      if (config.projects.length === 0) {
+        console.error("Error: No projects configured.");
+        console.error("Run `whs add <path>` to add a project first.");
+        process.exit(1);
+      }
+
+      if (config.projects.length === 1) {
+        project = config.projects[0];
+        projectName = project.name;
+      } else {
+        console.log("\nAvailable projects:");
+        for (const p of config.projects) {
+          console.log(`  - ${p.name}`);
+        }
+        console.error("\nSpecify a project: whs setup hooks <project>");
+        process.exit(1);
+      }
+    }
+
+    const projectPath = expandPath(project.repoPath);
+    console.log(`\n  Analyzing worktree hooks for: ${projectName}`);
+    console.log(`  Path: ${projectPath}\n`);
+
+    const {
+      hasWtConfig,
+      analyzeProjectForHooks,
+      formatHooksAsToml,
+      writeWtConfig,
+    } = await import("./worktree-hooks.js");
+
+    // Check existing config
+    if (hasWtConfig(projectPath) && !options.write) {
+      const { createInterface } = await import("readline");
+      const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question("  .config/wt.toml already exists. Overwrite? (y/N): ", (ans) => {
+          resolve(ans.trim());
+          rl.close();
+        });
+      });
+
+      if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
+        console.log("  Cancelled.");
+        return;
+      }
+    }
+
+    try {
+      console.log("  Running analysis...\n");
+      const { createAgentRunner } = await import("./agent-runner-factory.js");
+      const runner = createAgentRunner(config.runnerType);
+      const hooks = await analyzeProjectForHooks(projectPath, runner);
+      const toml = formatHooksAsToml(hooks);
+
+      console.log("  Suggested .config/wt.toml:\n");
+      for (const line of toml.split("\n")) {
+        console.log(`    ${line}`);
+      }
+      console.log("");
+
+      if (options.write) {
+        writeWtConfig(projectPath, toml);
+        console.log("  Written to .config/wt.toml\n");
+        return;
+      }
+
+      const { createInterface } = await import("readline");
+      const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question("  Write this config? (Y/n): ", (ans) => {
+          resolve(ans.trim());
+          rl.close();
+        });
+      });
+
+      if (answer.toLowerCase() !== "n" && answer.toLowerCase() !== "no") {
+        writeWtConfig(projectPath, toml);
+        console.log("\n  Written to .config/wt.toml\n");
+      } else {
+        console.log("  Cancelled.\n");
+      }
+    } catch (err) {
+      console.error(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 /**
