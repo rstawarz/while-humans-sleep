@@ -20,6 +20,8 @@ export interface Config {
     maxPerProject: number;
   };
   notifier: "cli" | "slack";
+  /** Agent runner type: "cli" uses Max subscription, "sdk" uses API (pay-per-token) */
+  runnerType: "cli" | "sdk";
   slack?: {
     token: string;
     channelId: string;

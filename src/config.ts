@@ -25,6 +25,7 @@ function createDefaultConfig(orchestratorPath: string): Config {
       maxPerProject: 2,
     },
     notifier: "cli",
+    runnerType: "cli",
   };
 }
 
@@ -202,6 +203,7 @@ function validateConfig(parsed: Partial<Config>, configDir: string): Config {
       maxPerProject: parsed.concurrency?.maxPerProject ?? 2,
     },
     notifier: parsed.notifier ?? "cli",
+    runnerType: parsed.runnerType ?? "cli",
   };
 
   if (parsed.slack) {

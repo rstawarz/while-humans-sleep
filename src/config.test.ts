@@ -96,6 +96,7 @@ describe("config file operations", () => {
       orchestratorPath: "/orch",
       concurrency: { maxTotal: 4, maxPerProject: 2 },
       notifier: "cli",
+      runnerType: "cli",
     };
 
     // Write and read back
@@ -127,6 +128,7 @@ describe("config file operations", () => {
         maxPerProject: parsed.concurrency?.maxPerProject ?? 2,
       },
       notifier: parsed.notifier ?? "cli",
+      runnerType: parsed.runnerType ?? "cli",
     };
 
     expect(validated.concurrency.maxTotal).toBe(4);
@@ -159,6 +161,7 @@ describe("config file operations", () => {
       orchestratorPath: "/orch",
       concurrency: { maxTotal: 4, maxPerProject: 2 },
       notifier: "slack",
+      runnerType: "cli",
       slack: {
         token: "xoxb-test",
         channelId: "C123",
@@ -228,6 +231,7 @@ describe("config functions with temp directory", () => {
           maxPerProject: partialConfig.concurrency?.maxPerProject ?? 2,
         },
         notifier: partialConfig.notifier ?? "cli",
+        runnerType: partialConfig.runnerType ?? "cli",
       };
 
       expect(validated.orchestratorPath).toBe("/default/orchestrator");
@@ -242,6 +246,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate validation check
@@ -260,6 +265,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "slack",
+      runnerType: "cli",
         slack: { token: "test-token", channelId: "C123" },
       };
 
@@ -279,6 +285,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate addProject
@@ -305,6 +312,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       const project: Project = {
@@ -333,6 +341,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate removeProject
@@ -353,6 +362,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate updateProject
@@ -378,6 +388,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate getProject
@@ -399,6 +410,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate listProjects
@@ -415,6 +427,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/orch",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate updateConcurrency
@@ -434,6 +447,7 @@ describe("config functions with temp directory", () => {
         orchestratorPath: "/old/path",
         concurrency: { maxTotal: 4, maxPerProject: 2 },
         notifier: "cli",
+      runnerType: "cli",
       };
 
       // Simulate setOrchestratorPath with expandPath
@@ -501,6 +515,7 @@ describe("initializeWhs behavior", () => {
       orchestratorPath: orchestratorPath,
       concurrency: { maxTotal: 4, maxPerProject: 2 },
       notifier: "cli",
+      runnerType: "cli",
     };
 
     writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
@@ -548,6 +563,7 @@ describe("initializeWhs behavior", () => {
       orchestratorPath: "/orch",
       concurrency: { maxTotal: 4, maxPerProject: 2 },
       notifier: "cli",
+      runnerType: "cli",
     };
 
     writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
