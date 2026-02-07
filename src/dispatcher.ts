@@ -45,7 +45,10 @@ import {
   getWorkflowForSource,
   getStepResumeInfo,
   clearStepResumeInfo,
+  getStepsPendingCI,
+  updateStepCIStatus,
 } from "./workflow.js";
+import { execSync } from "child_process";
 import { ensureWorktree, removeWorktree } from "./worktree.js";
 import { formatAgentPrompt, type AgentRunner } from "./agent-runner.js";
 import { createAgentRunner } from "./agent-runner-factory.js";
@@ -275,8 +278,11 @@ export class Dispatcher {
       return;
     }
 
-    // 1. Poll orchestrator beads for ready workflow steps
-    // Note: Steps blocked by question beads won't appear in ready list
+    // 1. Check CI status for any pending steps
+    await this.checkPendingCI();
+
+    // 2. Poll orchestrator beads for ready workflow steps
+    // Note: Steps blocked by question beads or ci:pending won't appear in ready list
     const workflowSteps = this.getReadyWorkflowSteps();
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
@@ -293,7 +299,7 @@ export class Dispatcher {
       this.runningAgents.set(step.id, agentPromise);
     }
 
-    // 3. If under capacity, poll project beads for new work
+    // 4. If under capacity, poll project beads for new work
     if (this.state.activeWork.size < this.config.concurrency.maxTotal) {
       const newWork = await this.pollProjectBacklogs();
       const next = this.pickHighestPriority(newWork);
@@ -312,6 +318,137 @@ export class Dispatcher {
 
   private isAtCapacity(): boolean {
     return this.state.activeWork.size >= this.config.concurrency.maxTotal;
+  }
+
+  /**
+   * Maximum CI retry attempts before marking as blocked
+   */
+  private readonly MAX_CI_RETRIES = 5;
+
+  /**
+   * Checks CI status for steps waiting on CI
+   *
+   * For each step with ci:pending, checks GitHub PR status:
+   * - If passed: updates to ci:passed, step becomes ready for quality_review
+   * - If failed: creates implementation step for fixes, tracks retry count
+   * - After MAX_CI_RETRIES failures: marks workflow as BLOCKED
+   */
+  private async checkPendingCI(): Promise<void> {
+    const pendingSteps = getStepsPendingCI();
+
+    for (const step of pendingSteps) {
+      try {
+        const ciStatus = this.getGitHubCIStatus(step.prNumber);
+
+        if (ciStatus === "pending") {
+          // Still running, skip
+          continue;
+        }
+
+        if (ciStatus === "passed") {
+          console.log(`✅ CI passed for PR #${step.prNumber}`);
+          updateStepCIStatus(step.id, "passed", step.retryCount);
+          // Step will now be picked up as ready (ci:passed, no ci:pending)
+          continue;
+        }
+
+        if (ciStatus === "failed") {
+          console.log(`❌ CI failed for PR #${step.prNumber} (attempt ${step.retryCount + 1}/${this.MAX_CI_RETRIES})`);
+
+          // Check retry limit
+          if (step.retryCount + 1 >= this.MAX_CI_RETRIES) {
+            console.log(`🚫 Max CI retries reached for PR #${step.prNumber}, marking as BLOCKED`);
+            updateStepCIStatus(step.id, "failed", step.retryCount);
+
+            // Mark the workflow as blocked
+            const sourceInfo = getSourceBeadInfo(step.epicId);
+            if (sourceInfo) {
+              await this.markWorkflowBlocked(
+                {
+                  workItem: {
+                    id: step.id,
+                    project: sourceInfo.project,
+                    title: `PR #${step.prNumber}`,
+                    description: "",
+                    priority: 2,
+                    type: "task",
+                    status: "open",
+                    labels: [],
+                    dependencies: [],
+                  },
+                  workflowEpicId: step.epicId,
+                  workflowStepId: step.id,
+                  sessionId: "",
+                  worktreePath: "",
+                  startedAt: new Date(),
+                  agent: "implementation",
+                  costSoFar: 0,
+                },
+                `CI failed ${this.MAX_CI_RETRIES} times for PR #${step.prNumber}. Human intervention required.`
+              );
+            }
+            continue;
+          }
+
+          // Update status and create new implementation step
+          updateStepCIStatus(step.id, "failed", step.retryCount);
+
+          // Close the current step
+          completeStep(step.id, "ci_failed");
+
+          // Create new implementation step for fixes
+          createNextStep(
+            step.epicId,
+            "implementation",
+            `CI failed for PR #${step.prNumber}. Please fix the failing checks and push updates.`,
+            { pr_number: step.prNumber, ci_status: "failed" }
+          );
+
+          console.log(`   Created implementation step to fix CI failures`);
+        }
+      } catch (err) {
+        console.error(`Failed to check CI for PR #${step.prNumber}:`, err);
+      }
+    }
+  }
+
+  /**
+   * Gets CI status from GitHub for a PR
+   *
+   * Returns: "pending" | "passed" | "failed"
+   */
+  private getGitHubCIStatus(prNumber: number): "pending" | "passed" | "failed" {
+    try {
+      // Use gh pr checks to get CI status
+      const result = execSync(
+        `gh pr checks ${prNumber} --json state,bucket --jq '[.[] | .state] | unique'`,
+        { encoding: "utf-8", timeout: 30000 }
+      ).trim();
+
+      // Result is a JSON array like ["SUCCESS"] or ["PENDING"] or ["FAILURE", "SUCCESS"]
+      const states: string[] = JSON.parse(result || "[]");
+
+      // If any check is pending/in_progress, overall is pending
+      if (states.some((s) => s === "PENDING" || s === "IN_PROGRESS" || s === "QUEUED")) {
+        return "pending";
+      }
+
+      // If any check failed, overall is failed
+      if (states.some((s) => s === "FAILURE" || s === "ERROR" || s === "CANCELLED")) {
+        return "failed";
+      }
+
+      // All checks passed (or no checks)
+      if (states.length === 0 || states.every((s) => s === "SUCCESS" || s === "SKIPPED")) {
+        return "passed";
+      }
+
+      // Unknown state, treat as pending
+      return "pending";
+    } catch {
+      // If gh command fails, treat as pending (will retry next tick)
+      return "pending";
+    }
   }
 
   /**

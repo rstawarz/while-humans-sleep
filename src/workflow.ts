@@ -211,6 +211,7 @@ export function getWorkflowEpic(stepId: string): Bead | null {
  *
  * Returns steps that are ready to be worked on (no blocking dependencies).
  * Only returns beads with the whs:step label (excludes questions and other bead types).
+ * Filters out steps waiting for CI (ci:pending label).
  */
 export function getReadyWorkflowSteps(): WorkflowStep[] {
   const orchestratorPath = getOrchestratorPath();
@@ -221,10 +222,12 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
       labelAll: ["whs:step"],
     });
 
-    // Filter to only open steps - bd ready returns both open and in_progress
-    // We only want steps that haven't been started yet
+    // Filter to only open steps that aren't waiting for CI
+    // bd ready returns both open and in_progress - we only want open
+    // Also skip steps with ci:pending label (waiting for CI to complete)
     return readyBeads
       .filter((bead) => bead.status === "open")
+      .filter((bead) => !bead.labels.includes("ci:pending"))
       .map((bead) => ({
         id: bead.id,
         epicId: bead.parent || "",
@@ -235,6 +238,109 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Step pending CI check
+ */
+export interface PendingCIStep {
+  id: string;
+  epicId: string;
+  prNumber: number;
+  retryCount: number;
+}
+
+/**
+ * Gets workflow steps that are waiting for CI to complete
+ *
+ * Returns steps with ci:pending label and extracts PR number from pr:XXX label.
+ */
+export function getStepsPendingCI(): PendingCIStep[] {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const pendingBeads = beads.list(orchestratorPath, {
+      type: "task",
+      status: "open",
+      labelAll: ["whs:step", "ci:pending"],
+    });
+
+    return pendingBeads
+      .map((bead) => {
+        const prNumber = extractPRNumber(bead.labels);
+        const retryCount = extractCIRetryCount(bead.labels);
+        if (prNumber === null) return null;
+        return {
+          id: bead.id,
+          epicId: bead.parent || "",
+          prNumber,
+          retryCount,
+        };
+      })
+      .filter((step): step is PendingCIStep => step !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extracts PR number from labels (pr:XXX)
+ */
+function extractPRNumber(labels: string[]): number | null {
+  for (const label of labels) {
+    if (label.startsWith("pr:")) {
+      const num = parseInt(label.slice(3), 10);
+      if (!isNaN(num)) return num;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts CI retry count from labels (ci-retries:N)
+ */
+function extractCIRetryCount(labels: string[]): number {
+  for (const label of labels) {
+    if (label.startsWith("ci-retries:")) {
+      const num = parseInt(label.slice(11), 10);
+      if (!isNaN(num)) return num;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Updates a step's CI status after checking
+ *
+ * Removes ci:pending, adds ci:passed or ci:failed.
+ * If failed, increments ci-retries:N counter.
+ */
+export function updateStepCIStatus(
+  stepId: string,
+  status: "passed" | "failed",
+  currentRetryCount: number
+): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  // Remove old CI labels
+  const labelsToRemove = ["ci:pending", "ci:passed", "ci:failed"];
+  // Also remove old retry count label
+  for (let i = 0; i <= 10; i++) {
+    labelsToRemove.push(`ci-retries:${i}`);
+  }
+
+  // Add new status label
+  const labelsToAdd = [`ci:${status}`];
+
+  // If failed, increment retry count
+  if (status === "failed") {
+    labelsToAdd.push(`ci-retries:${currentRetryCount + 1}`);
+  }
+
+  beads.update(stepId, orchestratorPath, {
+    labelRemove: labelsToRemove,
+    labelAdd: labelsToAdd,
+  });
 }
 
 /**

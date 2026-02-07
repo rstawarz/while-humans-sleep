@@ -82,6 +82,9 @@ vi.mock("./workflow.js", () => ({
   getWorkflowForSource: vi.fn(() => null),
   getStepResumeInfo: vi.fn(() => null),
   clearStepResumeInfo: vi.fn(),
+  // CI checking functions
+  getStepsPendingCI: vi.fn(() => []),
+  updateStepCIStatus: vi.fn(),
 }));
 
 vi.mock("./worktree.js", () => ({
@@ -90,9 +93,18 @@ vi.mock("./worktree.js", () => ({
 }));
 
 vi.mock("./agent-runner.js", () => ({
-  runAgent: vi.fn(),
   formatAgentPrompt: vi.fn(({ taskTitle }) => `Work on: ${taskTitle}`),
+}));
+
+// Create a mock agent runner that can be configured per test
+const mockAgentRunnerInstance = {
+  run: vi.fn(),
   resumeWithAnswer: vi.fn(),
+  abort: vi.fn(),
+};
+
+vi.mock("./agent-runner-factory.js", () => ({
+  createAgentRunner: vi.fn(() => mockAgentRunnerInstance),
 }));
 
 vi.mock("./handoff.js", () => ({
@@ -179,7 +191,7 @@ describe("Dispatcher E2E", () => {
       });
 
       // Agent runs successfully and produces handoff
-      mockAgentRunner.runAgent.mockResolvedValue({
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "Done! PR created.",
         costUsd: 0.05,
@@ -217,7 +229,7 @@ describe("Dispatcher E2E", () => {
       );
 
       // Verify agent was run
-      expect(mockAgentRunner.runAgent).toHaveBeenCalled();
+      expect(mockAgentRunnerInstance.run).toHaveBeenCalled();
 
       // Verify handoff was processed
       expect(mockWorkflow.completeStep).toHaveBeenCalledWith(
@@ -246,7 +258,13 @@ describe("Dispatcher E2E", () => {
         stepId: "bd-w001.1",
       });
 
-      mockAgentRunner.runAgent.mockResolvedValue({
+      // Need to provide source bead info for closing the source bead
+      mockWorkflow.getSourceBeadInfo.mockReturnValue({
+        project: "test-project",
+        beadId: "bd-123",
+      });
+
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "All done!",
         costUsd: 0.05,
@@ -295,7 +313,7 @@ describe("Dispatcher E2E", () => {
         stepId: "bd-w001.1",
       });
 
-      mockAgentRunner.runAgent.mockResolvedValue({
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "Need human input.",
         costUsd: 0.05,
@@ -357,7 +375,7 @@ describe("Dispatcher E2E", () => {
         beadId: "bd-123",
       });
 
-      mockAgentRunner.runAgent.mockResolvedValue({
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-456",
         output: "Approved!",
         costUsd: 0.03,
@@ -379,7 +397,7 @@ describe("Dispatcher E2E", () => {
       expect(mockWorkflow.markStepInProgress).toHaveBeenCalledWith("bd-w001.2");
 
       // Verify agent was run
-      expect(mockAgentRunner.runAgent).toHaveBeenCalled();
+      expect(mockAgentRunnerInstance.run).toHaveBeenCalled();
 
       // Verify next step was created
       expect(mockWorkflow.createNextStep).toHaveBeenCalledWith(
@@ -402,7 +420,7 @@ describe("Dispatcher E2E", () => {
       });
 
       // Agent asks a question
-      mockAgentRunner.runAgent.mockResolvedValue({
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "Need input",
         costUsd: 0.02,
@@ -459,7 +477,7 @@ describe("Dispatcher E2E", () => {
       });
 
       // Agent throws rate limit error
-      mockAgentRunner.runAgent.mockRejectedValue(new Error("Rate limit exceeded (429)"));
+      mockAgentRunnerInstance.run.mockRejectedValue(new Error("Rate limit exceeded (429)"));
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
       (dispatcher as any).running = true;
@@ -483,7 +501,7 @@ describe("Dispatcher E2E", () => {
       });
 
       // Agent throws generic error
-      mockAgentRunner.runAgent.mockRejectedValue(new Error("Something went wrong"));
+      mockAgentRunnerInstance.run.mockRejectedValue(new Error("Something went wrong"));
 
       const dispatcher = new Dispatcher(testConfig, mockNotifier);
       (dispatcher as any).running = true;
@@ -510,7 +528,7 @@ describe("Dispatcher E2E", () => {
         stepId: "bd-w001.1",
       });
 
-      mockAgentRunner.runAgent.mockResolvedValue({
+      mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "Done",
         costUsd: 0.05,
@@ -560,7 +578,7 @@ describe("Dispatcher E2E", () => {
       });
 
       // Don't resolve agent runs (simulates long-running)
-      mockAgentRunner.runAgent.mockReturnValue(new Promise(() => {}));
+      mockAgentRunnerInstance.run.mockReturnValue(new Promise(() => {}));
 
       const dispatcher = new Dispatcher(limitedConfig, mockNotifier);
 
@@ -595,7 +613,7 @@ describe("Dispatcher E2E", () => {
         stepId: "bd-w001.1",
       });
 
-      mockAgentRunner.runAgent.mockReturnValue(new Promise(() => {}));
+      mockAgentRunnerInstance.run.mockReturnValue(new Promise(() => {}));
 
       const dispatcher = new Dispatcher(limitedConfig, mockNotifier);
 

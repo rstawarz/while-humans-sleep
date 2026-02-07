@@ -371,6 +371,134 @@ describe("workflow functions with mocked beads", () => {
 
       expect(steps).toEqual([]);
     });
+
+    it("filters out steps with ci:pending label", async () => {
+      const { getReadyWorkflowSteps } = await import("./workflow.js");
+
+      mockBeads.ready.mockReturnValue([
+        {
+          id: "bd-w001.1",
+          title: "implementation",
+          parent: "bd-w001",
+          labels: ["agent:implementation", "whs:step"],
+          status: "open",
+        },
+        {
+          id: "bd-w001.2",
+          title: "quality_review",
+          parent: "bd-w001",
+          labels: ["agent:quality_review", "whs:step", "ci:pending", "pr:42"],
+          status: "open",
+        },
+      ]);
+
+      const steps = getReadyWorkflowSteps();
+
+      // Only the implementation step should be returned (no ci:pending)
+      expect(steps).toHaveLength(1);
+      expect(steps[0].id).toBe("bd-w001.1");
+    });
+  });
+
+  describe("getStepsPendingCI", () => {
+    it("returns steps with ci:pending label and PR number", async () => {
+      const { getStepsPendingCI } = await import("./workflow.js");
+
+      mockBeads.list.mockReturnValue([
+        {
+          id: "bd-w001.2",
+          title: "quality_review",
+          parent: "bd-w001",
+          labels: ["agent:quality_review", "whs:step", "ci:pending", "pr:42"],
+          status: "open",
+        },
+        {
+          id: "bd-w002.1",
+          title: "quality_review",
+          parent: "bd-w002",
+          labels: ["agent:quality_review", "whs:step", "ci:pending", "pr:99", "ci-retries:2"],
+          status: "open",
+        },
+      ]);
+
+      const steps = getStepsPendingCI();
+
+      expect(steps).toHaveLength(2);
+      expect(steps[0]).toEqual({
+        id: "bd-w001.2",
+        epicId: "bd-w001",
+        prNumber: 42,
+        retryCount: 0,
+      });
+      expect(steps[1]).toEqual({
+        id: "bd-w002.1",
+        epicId: "bd-w002",
+        prNumber: 99,
+        retryCount: 2,
+      });
+    });
+
+    it("filters out steps without PR number", async () => {
+      const { getStepsPendingCI } = await import("./workflow.js");
+
+      mockBeads.list.mockReturnValue([
+        {
+          id: "bd-w001.2",
+          title: "quality_review",
+          parent: "bd-w001",
+          labels: ["agent:quality_review", "whs:step", "ci:pending"], // No pr:XX label
+          status: "open",
+        },
+      ]);
+
+      const steps = getStepsPendingCI();
+
+      expect(steps).toHaveLength(0);
+    });
+
+    it("returns empty array on error", async () => {
+      const { getStepsPendingCI } = await import("./workflow.js");
+
+      mockBeads.list.mockImplementation(() => {
+        throw new Error("Failed");
+      });
+
+      const steps = getStepsPendingCI();
+
+      expect(steps).toEqual([]);
+    });
+  });
+
+  describe("updateStepCIStatus", () => {
+    it("updates labels for CI passed", async () => {
+      const { updateStepCIStatus } = await import("./workflow.js");
+
+      updateStepCIStatus("bd-w001.2", "passed", 0);
+
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.2",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          labelAdd: ["ci:passed"],
+          labelRemove: expect.arrayContaining(["ci:pending", "ci:passed", "ci:failed"]),
+        })
+      );
+    });
+
+    it("updates labels for CI failed and increments retry count", async () => {
+      const { updateStepCIStatus } = await import("./workflow.js");
+
+      updateStepCIStatus("bd-w001.2", "failed", 2);
+
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.2",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          labelAdd: ["ci:failed", "ci-retries:3"],
+          labelRemove: expect.arrayContaining(["ci:pending", "ci-retries:2"]),
+        })
+      );
+    });
   });
 
   describe("getActiveWorkflows", () => {
