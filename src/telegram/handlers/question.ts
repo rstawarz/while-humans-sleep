@@ -186,7 +186,7 @@ export class QuestionHandler implements TelegramHandler {
 
     // Send confirmation
     await ctx.reply(
-      `\\u2713 Answer recorded for \`${escapeMarkdownV2(questionBeadId)}\`\nDispatcher will resume the agent\\.`,
+      `\u2713 Answer recorded for \`${escapeMarkdownV2(questionBeadId)}\`\nDispatcher will resume the agent\\.`,
       { parse_mode: "MarkdownV2" }
     );
 

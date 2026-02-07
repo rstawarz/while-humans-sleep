@@ -133,12 +133,12 @@ export function parseCallbackData(data: string): CallbackData | null {
  * Format a confirmation message after an answer is submitted
  */
 export function formatAnswerConfirmation(questionBeadId: string): string {
-  return `\\u2713 Answer recorded for \`${escapeMarkdownV2(questionBeadId)}\`\nDispatcher will resume the agent\\.`;
+  return `\u2713 Answer recorded for \`${escapeMarkdownV2(questionBeadId)}\`\nDispatcher will resume the agent\\.`;
 }
 
 /**
  * Format an error message
  */
 export function formatError(message: string): string {
-  return `\\u274C Error: ${escapeMarkdownV2(message)}`;
+  return `\u274C Error: ${escapeMarkdownV2(message)}`;
 }

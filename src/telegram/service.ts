@@ -14,6 +14,7 @@ import { MessageStore } from "./message-store.js";
 import { QuestionHandler } from "./handlers/question.js";
 import { beads } from "../beads/index.js";
 import { loadConfig, expandPath } from "../config.js";
+import { escapeMarkdownV2 } from "./formatter.js";
 import type { Notifier, QuestionBeadData, ActiveWork } from "../types.js";
 
 /**
@@ -188,8 +189,8 @@ export class TelegramService implements Notifier {
 
   async notifyComplete(work: ActiveWork, result: "done" | "blocked"): Promise<void> {
     // Phase 2: Completion notifications
-    const emoji = result === "done" ? "\\u2705" : "\\u26D4";
-    const message = `${emoji} *${result.toUpperCase()}*: ${work.workItem.project}/${work.workItem.id}\nAgent: ${work.agent}\nCost: \\$${work.costSoFar.toFixed(4)}`;
+    const emoji = result === "done" ? "\u2705" : "\u26D4";
+    const message = `${emoji} *${result.toUpperCase()}*: ${escapeMarkdownV2(work.workItem.project)}/${escapeMarkdownV2(work.workItem.id)}\nAgent: ${escapeMarkdownV2(work.agent)}\nCost: \\$${work.costSoFar.toFixed(4)}`;
 
     try {
       await this.sendMessage(message, { parse_mode: "MarkdownV2" });
@@ -200,7 +201,7 @@ export class TelegramService implements Notifier {
 
   async notifyError(work: ActiveWork, error: Error): Promise<void> {
     // Phase 2: Error notifications
-    const message = `\\u274C *ERROR* in ${work.workItem.project}/${work.workItem.id}\nAgent: ${work.agent}\nError: ${error.message.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")}`;
+    const message = `\u274C *ERROR* in ${escapeMarkdownV2(work.workItem.project)}/${escapeMarkdownV2(work.workItem.id)}\nAgent: ${escapeMarkdownV2(work.agent)}\nError: ${escapeMarkdownV2(error.message)}`;
 
     try {
       await this.sendMessage(message, { parse_mode: "MarkdownV2" });
@@ -210,7 +211,7 @@ export class TelegramService implements Notifier {
   }
 
   async notifyRateLimit(error: Error): Promise<void> {
-    const message = `\\u26A0\\uFE0F *RATE LIMIT HIT* \\- Dispatcher paused\nError: ${error.message.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1")}\nRun \\'whs resume\\' when ready to continue\\.`;
+    const message = `\u26A0\uFE0F *RATE LIMIT HIT* \\- Dispatcher paused\nError: ${escapeMarkdownV2(error.message)}\nRun 'whs resume' when ready to continue\\.`;
 
     try {
       await this.sendMessage(message, { parse_mode: "MarkdownV2" });

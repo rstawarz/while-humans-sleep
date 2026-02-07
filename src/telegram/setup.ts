@@ -87,8 +87,7 @@ export async function validateTelegramConfig(
     // Try to send a test message (validates chat ID and permissions)
     await bot.api.sendMessage(
       chatId,
-      "\\u2705 WHS Telegram integration configured successfully\\!\n\nYou will receive questions and notifications here\\.",
-      { parse_mode: "MarkdownV2" }
+      "\u2705 WHS Telegram integration configured successfully!\n\nYou will receive questions and notifications here.",
     );
 
     return true;
