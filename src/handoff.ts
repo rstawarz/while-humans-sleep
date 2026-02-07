@@ -1,13 +1,50 @@
 /**
  * Handoff Parsing - Trust but verify pattern
  *
- * Attempts to parse handoff from agent output, falls back to forcing
- * handoff via tool call if parsing fails.
+ * Detection order:
+ * 1. Check for .whs-handoff.json file in worktree (most reliable - persists on crash)
+ * 2. Parse handoff from agent text output (YAML/JSON blocks)
+ * 3. Resume session via agent runner asking for handoff (maxTurns: 3)
+ * 4. Fallback: return BLOCKED
  */
 
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { join } from "path";
 import { parse as parseYaml } from "yaml";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentRunner } from "./agent-runner-interface.js";
 import type { Handoff } from "./types.js";
+
+/**
+ * Filename for file-based handoff mechanism.
+ * Agents write this file via `whs handoff` command.
+ */
+export const HANDOFF_FILENAME = ".whs-handoff.json";
+
+/**
+ * Prompt used when resuming a session to force a handoff
+ */
+export const FORCE_HANDOFF_PROMPT = `Your previous work did not include a handoff. You MUST provide one now.
+
+Run this command to record your handoff:
+
+whs handoff --next-agent <AGENT> --context "Brief summary of what you did and what the next agent needs to know"
+
+Valid values for --next-agent:
+- implementation - for code changes needed
+- quality_review - for PR review
+- release_manager - for merging an approved PR
+- DONE - task is fully complete
+- BLOCKED - human intervention needed
+
+Optional flags: --pr-number <N> --ci-status <pending|passed|failed>
+
+If the whs command is not available, output your handoff as a YAML block:
+
+\`\`\`yaml
+next_agent: <AGENT>
+context: |
+  Brief summary of what you did
+\`\`\``;
 
 /**
  * Valid agent names for handoff
@@ -24,39 +61,6 @@ export const VALID_AGENTS = [
 ] as const;
 
 export type ValidAgent = (typeof VALID_AGENTS)[number];
-
-/**
- * Schema for the Handoff custom tool
- */
-export const HANDOFF_TOOL_SCHEMA = {
-  name: "Handoff",
-  description:
-    "REQUIRED: Call this to complete your work and hand off to the next agent",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      next_agent: {
-        type: "string",
-        enum: VALID_AGENTS,
-        description: "The next agent to handle this work",
-      },
-      pr_number: {
-        type: "number",
-        description: "PR number if one was created or exists",
-      },
-      ci_status: {
-        type: "string",
-        enum: ["pending", "passed", "failed"],
-        description: "CI status if applicable",
-      },
-      context: {
-        type: "string",
-        description: "What you did and what the next agent needs to know",
-      },
-    },
-    required: ["next_agent", "context"],
-  },
-};
 
 /**
  * Attempts to parse a handoff from agent output
@@ -227,82 +231,128 @@ function findYamlEndIndex(text: string, startIndex: number): number {
 }
 
 /**
- * Forces a handoff via tool call by resuming the session
+ * Reads a handoff from the .whs-handoff.json file in the worktree.
  *
- * Used when tryParseHandoff fails to extract handoff from output.
+ * This is the most reliable handoff mechanism — the file is written by
+ * the `whs handoff` CLI command and persists even if the agent crashes
+ * after writing it.
  */
-export async function forceHandoffViaTool(
-  sessionId: string,
-  cwd: string
-): Promise<Handoff | null> {
-  const prompt =
-    "Your handoff was missing or malformed. You MUST call the Handoff tool now to complete your work.";
+export function readHandoffFile(worktreePath: string): Handoff | null {
+  const filePath = join(worktreePath, HANDOFF_FILENAME);
 
   try {
-    for await (const message of query({
-      prompt,
-      options: {
-        cwd,
-        resume: sessionId,
-        maxTurns: 1,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        // Note: Custom tools would be configured via MCP server
-        // For now, we'll parse from the output
-      },
-    })) {
-      if (message.type === "assistant" && message.message?.content) {
-        for (const block of message.message.content) {
-          if ("name" in block && block.name === "Handoff") {
-            const input = "input" in block ? block.input : undefined;
-            if (input && typeof input === "object") {
-              const handoff = validateHandoff(input as Record<string, unknown>);
-              if (handoff) return handoff;
-            }
-          }
-          // Also try to parse from text output
-          if ("text" in block && block.text) {
-            const parsed = tryParseHandoff(block.text);
-            if (parsed) return parsed;
-          }
-        }
-      }
+    if (!existsSync(filePath)) return null;
+
+    const content = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    return validateHandoff(parsed);
+  } catch (err) {
+    console.warn(
+      `Failed to read handoff file: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+}
+
+/**
+ * Writes a handoff file to the specified directory.
+ * Used by the `whs handoff` CLI command.
+ */
+export function writeHandoffFile(
+  dir: string,
+  handoff: Handoff
+): void {
+  const filePath = join(dir, HANDOFF_FILENAME);
+  writeFileSync(filePath, JSON.stringify(handoff, null, 2) + "\n");
+}
+
+/**
+ * Removes the handoff file after it has been read.
+ */
+export function cleanHandoffFile(worktreePath: string): void {
+  const filePath = join(worktreePath, HANDOFF_FILENAME);
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
     }
+  } catch {
+    // Best effort cleanup
+  }
+}
+
+/**
+ * Forces a handoff by resuming the session and asking the agent explicitly.
+ *
+ * Uses the same agent runner that ran the original session, so it works
+ * with both CLI and SDK runners. Gives the agent 3 turns to produce a
+ * handoff via `whs handoff` command or YAML output.
+ */
+export async function forceHandoffViaResume(
+  sessionId: string,
+  cwd: string,
+  runner: AgentRunner
+): Promise<Handoff | null> {
+  try {
+    const result = await runner.resumeWithAnswer(sessionId, FORCE_HANDOFF_PROMPT, {
+      cwd,
+      maxTurns: 3,
+    });
+
+    // Check for handoff file first (agent may have used `whs handoff`)
+    const fromFile = readHandoffFile(cwd);
+    if (fromFile) {
+      cleanHandoffFile(cwd);
+      return fromFile;
+    }
+
+    // Try to parse from output text
+    return tryParseHandoff(result.output);
   } catch (err) {
     console.error(
-      `Failed to force handoff via tool: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to force handoff via resume: ${err instanceof Error ? err.message : String(err)}`
     );
+    return null;
   }
-
-  return null;
 }
 
 /**
  * Gets handoff from agent output using trust-but-verify pattern
  *
- * 1. Try to parse handoff from output
- * 2. If parsing fails, resume session and force handoff via tool
- * 3. Return fallback BLOCKED handoff if all else fails
+ * Detection order:
+ * 1. Check for .whs-handoff.json file in worktree (most reliable)
+ * 2. Parse handoff from agent text output
+ * 3. Resume session via agent runner asking for handoff (maxTurns: 3)
+ * 4. Return fallback BLOCKED handoff if all else fails
  */
 export async function getHandoff(
   output: string,
   sessionId: string,
-  cwd: string
+  cwd: string,
+  runner?: AgentRunner
 ): Promise<Handoff> {
-  // 1. Try to parse from output
+  // 1. Check for handoff file (most reliable — persists across crashes)
+  const fromFile = readHandoffFile(cwd);
+  if (fromFile) {
+    cleanHandoffFile(cwd);
+    return fromFile;
+  }
+
+  // 2. Try to parse from output
   const parsed = tryParseHandoff(output);
   if (parsed) {
     return parsed;
   }
 
-  // 2. Try to force via tool
-  console.log("Handoff not found in output, requesting via tool...");
-  const forced = await forceHandoffViaTool(sessionId, cwd);
-  if (forced) {
-    return forced;
+  // 3. Resume session and ask for handoff
+  if (runner) {
+    console.log("Handoff not found in output, resuming session to request...");
+    const forced = await forceHandoffViaResume(sessionId, cwd, runner);
+    if (forced) {
+      return forced;
+    }
   }
 
-  // 3. Fallback
+  // 4. Fallback
   console.warn("Failed to get handoff, returning BLOCKED");
   return {
     next_agent: "BLOCKED",

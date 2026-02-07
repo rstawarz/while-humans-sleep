@@ -1463,4 +1463,62 @@ telegramCmd
     console.log("  Telegram notifications enabled.\n");
   });
 
+// Handoff command (called by agents from worktrees)
+program
+  .command("handoff")
+  .description("Record a handoff (called by agents to signal completion)")
+  .requiredOption("--next-agent <agent>", "Next agent to handle this work")
+  .requiredOption("--context <text>", "Summary of what was done and what the next agent needs to know")
+  .option("--pr-number <number>", "PR number if one was created")
+  .option("--ci-status <status>", "CI status: pending, passed, or failed")
+  .action(async (options) => {
+    const { writeHandoffFile, isValidAgent, HANDOFF_FILENAME } = await import("./handoff.js");
+
+    // Validate next_agent
+    if (!isValidAgent(options.nextAgent)) {
+      console.error(`Error: Invalid --next-agent "${options.nextAgent}"`);
+      console.error("Valid values: implementation, quality_review, release_manager, ux_specialist, architect, planner, DONE, BLOCKED");
+      process.exit(1);
+    }
+
+    // Validate ci_status if provided
+    if (options.ciStatus && !["pending", "passed", "failed"].includes(options.ciStatus)) {
+      console.error(`Error: Invalid --ci-status "${options.ciStatus}"`);
+      console.error("Valid values: pending, passed, failed");
+      process.exit(1);
+    }
+
+    // Build handoff object
+    const handoff: {
+      next_agent: string;
+      context: string;
+      pr_number?: number;
+      ci_status?: "pending" | "passed" | "failed";
+    } = {
+      next_agent: options.nextAgent,
+      context: options.context,
+    };
+
+    if (options.prNumber) {
+      const prNum = parseInt(options.prNumber, 10);
+      if (isNaN(prNum)) {
+        console.error(`Error: --pr-number must be a number, got "${options.prNumber}"`);
+        process.exit(1);
+      }
+      handoff.pr_number = prNum;
+    }
+
+    if (options.ciStatus) {
+      handoff.ci_status = options.ciStatus as "pending" | "passed" | "failed";
+    }
+
+    // Write handoff file to cwd
+    writeHandoffFile(process.cwd(), handoff);
+    console.log(`Handoff recorded: ${options.nextAgent}`);
+    console.log(`  File: ${HANDOFF_FILENAME}`);
+    console.log(`  Context: ${options.context.slice(0, 100)}${options.context.length > 100 ? "..." : ""}`);
+    if (handoff.pr_number) console.log(`  PR: #${handoff.pr_number}`);
+    if (handoff.ci_status) console.log(`  CI: ${handoff.ci_status}`);
+  });
+
 program.parse();

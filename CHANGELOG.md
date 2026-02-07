@@ -5,6 +5,19 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-02-07
+
+### Fixed
+- **Handoff mechanism**: Replaced broken SDK-based `forceHandoffViaTool` (used unregistered Handoff tool, wrong runner) with reliable 3-tier approach:
+  1. **File-based**: `whs handoff` CLI command writes `.whs-handoff.json` (persists across crashes)
+  2. **Output parsing**: Parse handoff from agent text output (YAML/JSON blocks)
+  3. **Resume fallback**: Resume session via actual agent runner with `maxTurns: 3` (was 1)
+- **Agent prompt**: Now instructs agents to use `whs handoff` command as preferred handoff method
+- Removed unused `HANDOFF_TOOL_SCHEMA` and `@anthropic-ai/claude-agent-sdk` import from handoff module
+
+### Added
+- `whs handoff` CLI command for agents to record structured handoffs via Bash
+
 ## [0.3.0] - 2025-02-07
 
 ### Fixed

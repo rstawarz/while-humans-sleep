@@ -760,7 +760,8 @@ export class Dispatcher {
       const handoff = await getHandoff(
         result.output,
         result.sessionId,
-        work.worktreePath
+        work.worktreePath,
+        this.agentRunner
       );
 
       // Process handoff
@@ -818,7 +819,8 @@ export class Dispatcher {
       const handoff = await getHandoff(
         result.output,
         result.sessionId,
-        work.worktreePath
+        work.worktreePath,
+        this.agentRunner
       );
 
       // Process handoff

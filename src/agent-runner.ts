@@ -196,8 +196,16 @@ export function formatAgentPrompt(params: {
 
   lines.push("");
   lines.push("## Handoff Instructions");
-  lines.push("When you complete your work, output a handoff in this format:");
+  lines.push("When you complete your work, you MUST signal a handoff using one of these methods:");
   lines.push("");
+  lines.push("### Method 1: whs handoff command (preferred)");
+  lines.push("Run this command to record your handoff:");
+  lines.push("```bash");
+  lines.push('whs handoff --next-agent <agent_name> --context "Brief summary of what you did" [--pr-number N] [--ci-status pending|passed|failed]');
+  lines.push("```");
+  lines.push("");
+  lines.push("### Method 2: YAML block (alternative)");
+  lines.push("Output a YAML block at the end of your response:");
   lines.push("```yaml");
   lines.push("next_agent: <agent_name>");
   lines.push("pr_number: <number if applicable>");
