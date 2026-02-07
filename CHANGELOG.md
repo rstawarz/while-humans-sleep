@@ -5,6 +5,13 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-02-07
+
+### Fixed
+- **Dispatch race condition**: Duplicate agent launches when tick fires before async dispatch registers in activeWork. Now marks step `in_progress` synchronously before async dispatch and checks `runningAgents` map as a second guard.
+- **Zombie detection**: Added reconciliation in every tick that detects activeWork entries with no running agent and resets them for retry.
+- **Circuit breaker**: Dispatch retry loop protection via `dispatch-attempts:N` label on step beads. After 3 failed attempts, step is marked BLOCKED instead of endlessly retrying.
+
 ## [0.2.2] - 2025-02-07
 
 ### Fixed

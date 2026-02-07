@@ -42,6 +42,7 @@ import {
   getSourceBeadInfo,
   getFirstAgent,
   markStepInProgress,
+  resetStepForRetry,
   getWorkflowForSource,
   getStepResumeInfo,
   clearStepResumeInfo,
@@ -72,6 +73,8 @@ export class Dispatcher {
   private readonly DAEMON_HEALTH_CHECK_INTERVAL = 60;
   // Graceful shutdown timeout (wait for agents)
   private readonly GRACEFUL_SHUTDOWN_TIMEOUT_MS = 300000; // 5 minutes
+  // Max dispatch attempts before circuit breaker trips
+  private readonly MAX_DISPATCH_ATTEMPTS = 3;
 
   constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner) {
     this.config = config;
@@ -278,6 +281,9 @@ export class Dispatcher {
       return;
     }
 
+    // 0. Reconcile activeWork with actually running agents (zombie detection)
+    this.reconcileActiveWork();
+
     // 1. Check CI status for any pending steps
     await this.checkPendingCI();
 
@@ -287,10 +293,31 @@ export class Dispatcher {
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
       if (this.state.activeWork.has(step.id)) continue;
+      if (this.runningAgents.has(step.id)) continue;
+
+      // Mark step in_progress synchronously BEFORE async dispatch
+      // This prevents the next tick from picking it up again
+      try {
+        markStepInProgress(step.id);
+      } catch (err) {
+        console.error(`Failed to mark step ${step.id} in progress:`, err);
+        continue;
+      }
 
       // Dispatch asynchronously and track the promise
       const agentPromise = this.dispatchWorkflowStep(step)
         .catch((err) => {
+          // Dispatch failed — use circuit breaker to reset or block
+          const wasReset = resetStepForRetry(step.id, this.MAX_DISPATCH_ATTEMPTS);
+          if (wasReset) {
+            console.warn(`⚠️  Dispatch failed for ${step.id}, will retry (${err instanceof Error ? err.message : String(err)})`);
+          } else {
+            console.error(`🚫 Dispatch failed for ${step.id} after max attempts, marking blocked`);
+          }
+          // Clean up activeWork if it was added
+          if (this.state.activeWork.has(step.id)) {
+            this.state = removeActiveWork(this.state, step.id);
+          }
           this.handleDispatchError(step, err);
         })
         .finally(() => {
@@ -312,6 +339,34 @@ export class Dispatcher {
             this.runningAgents.delete(next.id);
           });
         this.runningAgents.set(next.id, workflowPromise);
+      }
+    }
+  }
+
+  /**
+   * Reconciles activeWork with actually running agents.
+   *
+   * Detects zombies: entries in activeWork that have no corresponding
+   * running agent promise. This catches:
+   * - Agent process died without cleanup (kill -9, OOM)
+   * - State loaded from disk after a crash (startup recovery)
+   * - Promise rejection that wasn't caught
+   */
+  private reconcileActiveWork(): void {
+    for (const [id, work] of this.state.activeWork) {
+      if (!this.runningAgents.has(id)) {
+        console.warn(`🧟 Zombie detected: ${work.workItem.project}/${id} (in activeWork but no running agent)`);
+        this.state = removeActiveWork(this.state, id);
+
+        // Try to reset the step for retry (with circuit breaker)
+        if (work.workflowStepId) {
+          const wasReset = resetStepForRetry(work.workflowStepId, this.MAX_DISPATCH_ATTEMPTS);
+          if (wasReset) {
+            console.log(`   Reset step ${work.workflowStepId} to open for retry`);
+          } else {
+            console.log(`   Step ${work.workflowStepId} hit max dispatch attempts, marked blocked`);
+          }
+        }
       }
     }
   }
@@ -620,8 +675,8 @@ export class Dispatcher {
     // Use the epic ID we already fetched
     const epicId = epic.id;
 
-    // Mark step as in progress
-    markStepInProgress(step.id);
+    // Note: markStepInProgress is called synchronously in tick() before
+    // this async dispatch, to prevent race conditions with the next tick.
 
     // Create active work entry
     const activeWork: ActiveWork = {

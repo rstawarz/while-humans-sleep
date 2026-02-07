@@ -79,6 +79,7 @@ vi.mock("./workflow.js", () => ({
   getSourceBeadInfo: vi.fn(),
   getFirstAgent: vi.fn(() => "implementation"),
   markStepInProgress: vi.fn(),
+  resetStepForRetry: vi.fn(() => true),
   getWorkflowForSource: vi.fn(() => null),
   getStepResumeInfo: vi.fn(() => null),
   clearStepResumeInfo: vi.fn(),
@@ -943,5 +944,419 @@ describe("Dispatcher lock file", () => {
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
 
     await expect(dispatcher.start()).rejects.toThrow("Failed to acquire lock");
+  });
+});
+
+// ============================================================
+// Race Condition & Zombie Detection Tests
+// ============================================================
+
+describe("Dispatch race condition prevention", () => {
+  let mockBeads: any;
+  let mockWorkflow: any;
+  let mockState: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [
+      {
+        name: "test-project",
+        repoPath: "/home/user/work/test-project",
+        baseBranch: "main",
+        agentsPath: "docs/llm/agents",
+        beadsMode: "committed",
+      },
+    ],
+    orchestratorPath: "/home/user/work/whs-orchestrator",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockBeads = (await import("./beads/index.js")).beads;
+    mockWorkflow = await import("./workflow.js");
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("does not dispatch same step twice when runningAgents has it", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockBeads.ready.mockReturnValue([]);
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+      {
+        id: "bd-w001.1",
+        epicId: "bd-w001",
+        agent: "implementation",
+        context: "Work",
+        status: "open",
+      },
+    ]);
+
+    mockWorkflow.getWorkflowEpic.mockReturnValue({
+      id: "bd-w001",
+      labels: ["project:test-project", "source:bd-123"],
+    });
+    mockWorkflow.getSourceBeadInfo.mockReturnValue({
+      project: "test-project",
+      beadId: "bd-123",
+    });
+
+    // Agent never resolves (simulates long-running)
+    mockAgentRunnerInstance.run.mockReturnValue(new Promise(() => {}));
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+
+    // First tick dispatches the step
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    expect(mockWorkflow.markStepInProgress).toHaveBeenCalledTimes(1);
+    expect(mockAgentRunnerInstance.run).toHaveBeenCalledTimes(1);
+
+    // Step is still in runningAgents (agent hasn't finished)
+    expect((dispatcher as any).runningAgents.has("bd-w001.1")).toBe(true);
+
+    // Reset mocks but keep runningAgents state
+    mockWorkflow.markStepInProgress.mockClear();
+    mockAgentRunnerInstance.run.mockClear();
+
+    // Second tick should skip it due to runningAgents guard
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    expect(mockWorkflow.markStepInProgress).not.toHaveBeenCalled();
+    expect(mockAgentRunnerInstance.run).not.toHaveBeenCalled();
+  });
+
+  it("marks step in_progress before async dispatch", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockBeads.ready.mockReturnValue([]);
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+      {
+        id: "bd-w001.1",
+        epicId: "bd-w001",
+        agent: "implementation",
+        context: "Work",
+        status: "open",
+      },
+    ]);
+
+    mockWorkflow.getWorkflowEpic.mockReturnValue({
+      id: "bd-w001",
+      labels: ["project:test-project", "source:bd-123"],
+    });
+    mockWorkflow.getSourceBeadInfo.mockReturnValue({
+      project: "test-project",
+      beadId: "bd-123",
+    });
+
+    // Track call order
+    const callOrder: string[] = [];
+    mockWorkflow.markStepInProgress.mockImplementation(() => {
+      callOrder.push("markStepInProgress");
+    });
+    mockAgentRunnerInstance.run.mockImplementation(() => {
+      callOrder.push("agentRunner.run");
+      return Promise.resolve({
+        sessionId: "s-1",
+        output: "Done",
+        costUsd: 0.01,
+      });
+    });
+
+    const { getHandoff } = await import("./handoff.js");
+    (getHandoff as any).mockResolvedValue({
+      next_agent: "DONE",
+      context: "Complete",
+    });
+    mockWorkflow.getSourceBeadInfo.mockReturnValue({
+      project: "test-project",
+      beadId: "bd-123",
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // markStepInProgress should be called BEFORE agentRunner.run
+    expect(callOrder[0]).toBe("markStepInProgress");
+    expect(callOrder[1]).toBe("agentRunner.run");
+  });
+
+  it("skips step if markStepInProgress throws", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockBeads.ready.mockReturnValue([]);
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+      {
+        id: "bd-w001.1",
+        epicId: "bd-w001",
+        agent: "implementation",
+        context: "Work",
+        status: "open",
+      },
+    ]);
+
+    // markStepInProgress throws (e.g. beads CLI error)
+    mockWorkflow.markStepInProgress.mockImplementation(() => {
+      throw new Error("bd: bead not found");
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // Agent should NOT have been run
+    expect(mockAgentRunnerInstance.run).not.toHaveBeenCalled();
+    // Step should NOT be in runningAgents
+    expect((dispatcher as any).runningAgents.has("bd-w001.1")).toBe(false);
+  });
+});
+
+describe("Zombie detection and reconciliation", () => {
+  let mockWorkflow: any;
+  let mockState: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [
+      {
+        name: "test-project",
+        repoPath: "/home/user/work/test-project",
+        baseBranch: "main",
+        agentsPath: "docs/llm/agents",
+        beadsMode: "committed",
+      },
+    ],
+    orchestratorPath: "/home/user/work/whs-orchestrator",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const beadsModule = await import("./beads/index.js");
+    (beadsModule.beads as any).ready.mockReturnValue([]);
+    mockWorkflow = await import("./workflow.js");
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("detects and cleans up zombie activeWork entries", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+
+    // Simulate a zombie: in activeWork but NOT in runningAgents
+    const zombieWork: ActiveWork = {
+      workItem: {
+        id: "bd-w001.1",
+        project: "test-project",
+        title: "implementation",
+        description: "",
+        priority: 2,
+        type: "task",
+        status: "in_progress",
+        labels: [],
+        dependencies: [],
+      },
+      workflowEpicId: "bd-w001",
+      workflowStepId: "orc-abc.1",
+      sessionId: "dead-session",
+      worktreePath: "/tmp/worktree",
+      startedAt: new Date(),
+      agent: "implementation",
+      costSoFar: 0.05,
+    };
+
+    (dispatcher as any).state.activeWork.set("bd-w001.1", zombieWork);
+    // Note: NOT adding to runningAgents — this is the zombie condition
+
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // Zombie should be removed from activeWork
+    expect(mockState.removeActiveWork).toHaveBeenCalledWith(
+      expect.any(Object),
+      "bd-w001.1"
+    );
+
+    // Step should be reset for retry
+    expect(mockWorkflow.resetStepForRetry).toHaveBeenCalledWith("orc-abc.1", 3);
+  });
+
+  it("does not flag running agents as zombies", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+
+    const activeWork: ActiveWork = {
+      workItem: {
+        id: "bd-w001.1",
+        project: "test-project",
+        title: "implementation",
+        description: "",
+        priority: 2,
+        type: "task",
+        status: "in_progress",
+        labels: [],
+        dependencies: [],
+      },
+      workflowEpicId: "bd-w001",
+      workflowStepId: "orc-abc.1",
+      sessionId: "active-session",
+      worktreePath: "/tmp/worktree",
+      startedAt: new Date(),
+      agent: "implementation",
+      costSoFar: 0,
+    };
+
+    (dispatcher as any).state.activeWork.set("bd-w001.1", activeWork);
+    // This time, also add to runningAgents — NOT a zombie
+    (dispatcher as any).runningAgents.set("bd-w001.1", new Promise(() => {}));
+
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // Should NOT be removed
+    expect(mockState.removeActiveWork).not.toHaveBeenCalledWith(
+      expect.any(Object),
+      "bd-w001.1"
+    );
+    expect(mockWorkflow.resetStepForRetry).not.toHaveBeenCalled();
+  });
+});
+
+describe("Circuit breaker on dispatch failure", () => {
+  let mockBeads: any;
+  let mockWorkflow: any;
+  let mockState: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [
+      {
+        name: "test-project",
+        repoPath: "/home/user/work/test-project",
+        baseBranch: "main",
+        agentsPath: "docs/llm/agents",
+        beadsMode: "committed",
+      },
+    ],
+    orchestratorPath: "/home/user/work/whs-orchestrator",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockBeads = (await import("./beads/index.js")).beads;
+    mockWorkflow = await import("./workflow.js");
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("calls resetStepForRetry when dispatch throws", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockBeads.ready.mockReturnValue([]);
+    // Ensure markStepInProgress doesn't throw (reset from previous tests)
+    mockWorkflow.markStepInProgress.mockImplementation(() => {});
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+      {
+        id: "bd-w001.1",
+        epicId: "bd-w001",
+        agent: "implementation",
+        context: "Work",
+        status: "open",
+      },
+    ]);
+
+    // Make getWorkflowEpic throw (simulates beads CLI failure)
+    mockWorkflow.getWorkflowEpic.mockImplementation(() => {
+      throw new Error("bd: command failed");
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // resetStepForRetry should have been called by the .catch handler
+    expect(mockWorkflow.resetStepForRetry).toHaveBeenCalledWith("bd-w001.1", 3);
+  });
+
+  it("cleans up activeWork on agent error via handleAgentError", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockBeads.ready.mockReturnValue([]);
+    // Ensure markStepInProgress doesn't throw (reset from previous tests)
+    mockWorkflow.markStepInProgress.mockImplementation(() => {});
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+      {
+        id: "bd-w001.1",
+        epicId: "bd-w001",
+        agent: "implementation",
+        context: "Work",
+        status: "open",
+      },
+    ]);
+
+    mockWorkflow.getWorkflowEpic.mockReturnValue({
+      id: "bd-w001",
+      labels: ["project:test-project", "source:bd-123"],
+    });
+    mockWorkflow.getSourceBeadInfo.mockReturnValue({
+      project: "test-project",
+      beadId: "bd-123",
+    });
+
+    // Agent run throws (non-rate-limit error)
+    mockAgentRunnerInstance.run.mockRejectedValue(new Error("Agent crashed"));
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // handleAgentError marks workflow blocked and removes from activeWork
+    expect(mockWorkflow.completeWorkflow).toHaveBeenCalledWith(
+      "bd-w001",
+      "blocked",
+      expect.stringContaining("Agent error")
+    );
+    expect(mockState.removeActiveWork).toHaveBeenCalled();
   });
 });

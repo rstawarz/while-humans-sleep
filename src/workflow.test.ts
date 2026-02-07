@@ -599,6 +599,123 @@ describe("workflow functions with mocked beads", () => {
     });
   });
 
+  describe("resetStepForRetry", () => {
+    it("resets step to open and increments dispatch attempts", async () => {
+      const { resetStepForRetry } = await import("./workflow.js");
+
+      // Step has no dispatch-attempts label (first failure)
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001.1",
+        labels: ["agent:implementation", "whs:step"],
+        parent: "bd-w001",
+      });
+
+      const result = resetStepForRetry("bd-w001.1", 3);
+
+      expect(result).toBe(true);
+      // Should increment dispatch attempts
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.1",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          labelAdd: ["dispatch-attempts:1"],
+        })
+      );
+      // Should reset to open
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.1",
+        "/mock/orchestrator",
+        { status: "open" }
+      );
+    });
+
+    it("trips circuit breaker after max attempts", async () => {
+      const { resetStepForRetry } = await import("./workflow.js");
+
+      // Step already has 3 dispatch attempts
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001.1",
+        labels: ["agent:implementation", "whs:step", "dispatch-attempts:3"],
+        parent: "bd-w001",
+      });
+
+      const result = resetStepForRetry("bd-w001.1", 3);
+
+      expect(result).toBe(false);
+      // Should mark parent epic as blocked
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "blocked",
+          labelAdd: ["blocked:human"],
+        })
+      );
+      // Should add a comment explaining why
+      expect(mockBeads.comment).toHaveBeenCalledWith(
+        "bd-w001",
+        expect.stringContaining("failed to dispatch after 3 attempts"),
+        "/mock/orchestrator"
+      );
+      // Should close the step
+      expect(mockBeads.close).toHaveBeenCalledWith(
+        "bd-w001.1",
+        expect.stringContaining("Failed to dispatch after 3 attempts"),
+        "/mock/orchestrator"
+      );
+    });
+
+    it("handles step without parent gracefully on circuit break", async () => {
+      const { resetStepForRetry } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001.1",
+        labels: ["dispatch-attempts:3"],
+        // No parent
+      });
+
+      const result = resetStepForRetry("bd-w001.1", 3);
+
+      expect(result).toBe(false);
+      // Should still close the step
+      expect(mockBeads.close).toHaveBeenCalled();
+    });
+  });
+
+  describe("getDispatchAttempts", () => {
+    it("returns 0 when no dispatch-attempts label", async () => {
+      const { getDispatchAttempts } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001.1",
+        labels: ["agent:implementation", "whs:step"],
+      });
+
+      expect(getDispatchAttempts("bd-w001.1")).toBe(0);
+    });
+
+    it("returns count from dispatch-attempts label", async () => {
+      const { getDispatchAttempts } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001.1",
+        labels: ["agent:implementation", "dispatch-attempts:2"],
+      });
+
+      expect(getDispatchAttempts("bd-w001.1")).toBe(2);
+    });
+
+    it("returns 0 on error", async () => {
+      const { getDispatchAttempts } = await import("./workflow.js");
+
+      mockBeads.show.mockImplementation(() => {
+        throw new Error("Not found");
+      });
+
+      expect(getDispatchAttempts("nonexistent")).toBe(0);
+    });
+  });
+
   describe("addStepComment", () => {
     it("adds comment to step", async () => {
       const { addStepComment } = await import("./workflow.js");

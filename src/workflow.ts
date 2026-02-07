@@ -415,6 +415,98 @@ export function markStepInProgress(stepId: string): void {
 }
 
 /**
+ * Resets a workflow step back to open for retry, with circuit breaker.
+ *
+ * Tracks dispatch attempts via a `dispatch-attempts:N` label.
+ * After MAX_DISPATCH_ATTEMPTS failures, marks the workflow as BLOCKED
+ * instead of resetting to open, preventing infinite retry loops.
+ *
+ * @returns true if step was reset to open, false if circuit breaker tripped
+ */
+export function resetStepForRetry(
+  stepId: string,
+  maxAttempts: number = 3
+): boolean {
+  const orchestratorPath = getOrchestratorPath();
+  const attempts = getDispatchAttempts(stepId);
+
+  if (attempts >= maxAttempts) {
+    // Circuit breaker: mark the parent epic as blocked
+    try {
+      const step = beads.show(stepId, orchestratorPath);
+      if (step.parent) {
+        beads.update(step.parent, orchestratorPath, {
+          status: "blocked",
+          labelAdd: ["blocked:human"],
+        });
+        beads.comment(
+          step.parent,
+          `Blocked: Step ${stepId} failed to dispatch after ${attempts} attempts. Manual intervention required.`,
+          orchestratorPath
+        );
+      }
+      // Close the step as failed
+      beads.close(
+        stepId,
+        `Failed to dispatch after ${attempts} attempts`,
+        orchestratorPath
+      );
+    } catch {
+      // Best effort
+    }
+    return false;
+  }
+
+  // Increment attempts and reset to open
+  incrementDispatchAttempts(stepId, attempts);
+  beads.update(stepId, orchestratorPath, {
+    status: "open",
+  });
+  return true;
+}
+
+/**
+ * Gets the number of dispatch attempts from step labels
+ */
+export function getDispatchAttempts(stepId: string): number {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const step = beads.show(stepId, orchestratorPath);
+    for (const label of step.labels || []) {
+      if (label.startsWith("dispatch-attempts:")) {
+        const num = parseInt(label.slice(18), 10);
+        if (!isNaN(num)) return num;
+      }
+    }
+  } catch {
+    // Step may not exist
+  }
+  return 0;
+}
+
+/**
+ * Increments the dispatch attempts counter on a step
+ */
+function incrementDispatchAttempts(
+  stepId: string,
+  currentAttempts: number
+): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  // Remove old counter labels and add new one
+  const labelsToRemove: string[] = [];
+  for (let i = 0; i <= 10; i++) {
+    labelsToRemove.push(`dispatch-attempts:${i}`);
+  }
+
+  beads.update(stepId, orchestratorPath, {
+    labelRemove: labelsToRemove,
+    labelAdd: [`dispatch-attempts:${currentAttempts + 1}`],
+  });
+}
+
+/**
  * Adds a comment to a workflow step
  */
 export function addStepComment(stepId: string, comment: string): void {
