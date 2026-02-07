@@ -410,11 +410,37 @@ describe("state loading edge cases", () => {
   });
 });
 
-// Tests that directly use state functions with getStatePath test
+// Tests that directly use state functions with a temp orchestrator directory
 describe("state module direct tests", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    // Create a temp orchestrator directory with .whs config
+    tempDir = join(tmpdir(), `whs-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const whsDir = join(tempDir, ".whs");
+    mkdirSync(whsDir, { recursive: true });
+    // Create minimal config.json
+    const config = {
+      projects: [],
+      orchestratorPath: tempDir,
+      concurrency: { maxTotal: 4, maxPerProject: 2 },
+      notifier: "cli",
+      runnerType: "cli",
+    };
+    const { writeFileSync } = require("fs");
+    writeFileSync(join(whsDir, "config.json"), JSON.stringify(config));
+  });
+
+  afterEach(() => {
+    // Clean up temp directory
+    if (tempDir && existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("getStatePath returns path to state file", async () => {
     const { getStatePath } = await import("./state.js");
-    const path = getStatePath();
+    const path = getStatePath(tempDir);
     expect(path).toContain("state.json");
     expect(path).toContain(".whs");
   });
@@ -425,9 +451,35 @@ describe("state module direct tests", () => {
 // ============================================================
 
 describe("lock file management", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    // Create a temp orchestrator directory with .whs config
+    tempDir = join(tmpdir(), `whs-lock-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const whsDir = join(tempDir, ".whs");
+    mkdirSync(whsDir, { recursive: true });
+    // Create minimal config.json
+    const config = {
+      projects: [],
+      orchestratorPath: tempDir,
+      concurrency: { maxTotal: 4, maxPerProject: 2 },
+      notifier: "cli",
+      runnerType: "cli",
+    };
+    const { writeFileSync } = require("fs");
+    writeFileSync(join(whsDir, "config.json"), JSON.stringify(config));
+  });
+
+  afterEach(() => {
+    // Clean up temp directory
+    if (tempDir && existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("getLockPath returns path to lock file", async () => {
     const { getLockPath } = await import("./state.js");
-    const path = getLockPath();
+    const path = getLockPath(tempDir);
     expect(path).toContain("dispatcher.lock");
     expect(path).toContain(".whs");
   });
@@ -436,22 +488,22 @@ describe("lock file management", () => {
     const { acquireLock, releaseLock, getLockInfo } = await import("./state.js");
 
     // Ensure no lock exists
-    releaseLock();
+    releaseLock(tempDir);
 
     // Should be able to acquire lock
-    const acquired = acquireLock();
+    const acquired = acquireLock(tempDir);
     expect(acquired).toBe(true);
 
     // Lock info should show our PID
-    const info = getLockInfo();
+    const info = getLockInfo(tempDir);
     expect(info).not.toBeNull();
     expect(info?.pid).toBe(process.pid);
 
     // Release lock
-    releaseLock();
+    releaseLock(tempDir);
 
     // Lock info should be null
-    const infoAfter = getLockInfo();
+    const infoAfter = getLockInfo(tempDir);
     expect(infoAfter).toBeNull();
   });
 
@@ -459,50 +511,48 @@ describe("lock file management", () => {
     const { acquireLock, releaseLock } = await import("./state.js");
 
     // Clean up first
-    releaseLock();
+    releaseLock(tempDir);
 
     // First acquire should succeed
-    const first = acquireLock();
+    const first = acquireLock(tempDir);
     expect(first).toBe(true);
 
     // Second acquire should fail (lock held by us)
-    const second = acquireLock();
+    const second = acquireLock(tempDir);
     expect(second).toBe(false);
 
     // Clean up
-    releaseLock();
+    releaseLock(tempDir);
   });
 
   it("getLockInfo returns null when no lock exists", async () => {
     const { releaseLock, getLockInfo } = await import("./state.js");
 
-    releaseLock(); // Ensure no lock
+    releaseLock(tempDir); // Ensure no lock
 
-    const info = getLockInfo();
+    const info = getLockInfo(tempDir);
     expect(info).toBeNull();
   });
 
   it("getLockInfo detects stale locks from dead processes", async () => {
     const { getLockInfo, getLockPath, releaseLock } = await import("./state.js");
     const { writeFileSync } = await import("fs");
-    const { ensureConfigDir } = await import("./config.js");
 
     // Clean up first
-    releaseLock();
-    ensureConfigDir();
+    releaseLock(tempDir);
 
     // Create a fake lock with non-existent PID
     const fakeLock = {
       pid: 999999999, // Very unlikely to be a real PID
       startedAt: new Date().toISOString(),
     };
-    writeFileSync(getLockPath(), JSON.stringify(fakeLock));
+    writeFileSync(getLockPath(tempDir), JSON.stringify(fakeLock));
 
     // getLockInfo should return null (stale lock)
-    const info = getLockInfo();
+    const info = getLockInfo(tempDir);
     expect(info).toBeNull();
 
     // Clean up
-    releaseLock();
+    releaseLock(tempDir);
   });
 });
