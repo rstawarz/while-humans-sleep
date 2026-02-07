@@ -27,7 +27,6 @@ export interface Config {
     channelId: string;
   };
   telegram?: {
-    botToken: string;
     chatId: string;
   };
 }

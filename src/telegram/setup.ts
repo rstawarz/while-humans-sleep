@@ -7,10 +7,68 @@
  * 2. Getting the bot token
  * 3. Getting their chat ID
  * 4. Validating the configuration
+ *
+ * Security: Bot token is stored in .whs/.env (gitignored), not config.json
  */
 
 import { Bot } from "grammy";
-import { updateConfig } from "../config.js";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
+import { updateConfig, getConfigDir } from "../config.js";
+
+/**
+ * Save the Telegram bot token to .whs/.env
+ */
+function saveBotToken(botToken: string): void {
+  const configDir = getConfigDir();
+  const envPath = join(configDir, ".env");
+
+  // Read existing .env if it exists, preserve other vars
+  let existingContent = "";
+  try {
+    existingContent = readFileSync(envPath, "utf-8");
+  } catch {
+    // File doesn't exist, that's fine
+  }
+
+  // Remove any existing TELEGRAM_BOT_TOKEN line
+  const filteredLines = existingContent
+    .split("\n")
+    .filter((line) => !line.startsWith("TELEGRAM_BOT_TOKEN="));
+
+  // Add new token
+  const newContent = [
+    ...filteredLines.filter((l) => l.trim()),
+    "",
+    "# Telegram Bot Token (from @BotFather)",
+    `TELEGRAM_BOT_TOKEN=${botToken}`,
+    "",
+  ].join("\n");
+
+  writeFileSync(envPath, newContent);
+}
+
+/**
+ * Load Telegram bot token from .whs/.env
+ */
+export function loadBotToken(): string | undefined {
+  try {
+    const configDir = getConfigDir();
+    const envPath = join(configDir, ".env");
+
+    if (!existsSync(envPath)) return undefined;
+
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      if (line.startsWith("TELEGRAM_BOT_TOKEN=")) {
+        return line.slice("TELEGRAM_BOT_TOKEN=".length).trim();
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Validate Telegram configuration by making a test API call
@@ -89,13 +147,15 @@ export async function runSetupWizard(
     return false;
   }
 
-  // Save to config
+  // Save token to .env (sensitive) and chatId to config.json (not sensitive)
+  saveBotToken(botToken);
   updateConfig({
-    telegram: { botToken, chatId },
+    telegram: { chatId },
     notifier: "telegram",
   });
 
-  console.log("\n  Configuration saved to .whs/config.json");
+  console.log("\n  Bot token saved to .whs/.env (keep this secret!)");
+  console.log("  Chat ID saved to .whs/config.json");
   console.log("  Telegram will start automatically with `whs start`.\n");
 
   return true;

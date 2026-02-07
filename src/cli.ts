@@ -181,16 +181,20 @@ program
     let notifier: import("./types.js").Notifier;
     let telegramService: import("./telegram/index.js").TelegramService | null = null;
 
-    if (config.telegram?.botToken && config.telegram?.chatId) {
-      // Use Telegram notifier
-      const { TelegramService } = await import("./telegram/index.js");
-      telegramService = new TelegramService(
-        config.telegram.botToken,
-        config.telegram.chatId
-      );
-      notifier = telegramService;
-      await telegramService.start();
-      console.log("  Telegram bot started");
+    if (config.telegram?.chatId) {
+      // Load bot token from .env
+      const { TelegramService, loadBotToken } = await import("./telegram/index.js");
+      const botToken = loadBotToken();
+
+      if (botToken) {
+        telegramService = new TelegramService(botToken, config.telegram.chatId);
+        notifier = telegramService;
+        await telegramService.start();
+        console.log("  Telegram bot started");
+      } else {
+        console.log("  Telegram configured but bot token not found in .whs/.env");
+        notifier = new CLINotifier();
+      }
     } else {
       // Use CLI notifier
       notifier = new CLINotifier();
@@ -1396,16 +1400,18 @@ telegramCmd
 telegramCmd
   .command("status")
   .description("Show Telegram integration status")
-  .action(() => {
+  .action(async () => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
 
     const config = loadConfig();
+    const { loadBotToken } = await import("./telegram/index.js");
+    const botToken = loadBotToken();
 
     console.log("\n  Telegram Integration Status\n");
 
-    if (!config.telegram?.botToken || !config.telegram?.chatId) {
+    if (!config.telegram?.chatId) {
       console.log("  Not configured.");
       console.log("  Run 'whs telegram setup' to configure.\n");
       return;
@@ -1413,7 +1419,7 @@ telegramCmd
 
     console.log("  Configured:");
     console.log(`    Chat ID: ${config.telegram.chatId}`);
-    console.log(`    Token: ${config.telegram.botToken.slice(0, 10)}...`);
+    console.log(`    Bot token: ${botToken ? "present in .whs/.env" : "MISSING from .whs/.env"}`);
     console.log(`    Notifier: ${config.notifier}`);
     console.log("");
   });
@@ -1421,12 +1427,12 @@ telegramCmd
 telegramCmd
   .command("disable")
   .description("Disable Telegram notifications (switch to CLI)")
-  .action(() => {
+  .action(async () => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
 
-    const { updateConfig } = require("./config.js");
+    const { updateConfig } = await import("./config.js");
     updateConfig({ notifier: "cli" });
     console.log("  Telegram notifications disabled. Using CLI notifier.\n");
   });
@@ -1434,20 +1440,22 @@ telegramCmd
 telegramCmd
   .command("enable")
   .description("Enable Telegram notifications")
-  .action(() => {
+  .action(async () => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
 
     const config = loadConfig();
+    const { loadBotToken } = await import("./telegram/index.js");
+    const botToken = loadBotToken();
 
-    if (!config.telegram?.botToken || !config.telegram?.chatId) {
+    if (!config.telegram?.chatId || !botToken) {
       console.log("  Telegram not configured.");
       console.log("  Run 'whs telegram setup' first.\n");
       process.exit(1);
     }
 
-    const { updateConfig } = require("./config.js");
+    const { updateConfig } = await import("./config.js");
     updateConfig({ notifier: "telegram" });
     console.log("  Telegram notifications enabled.\n");
   });
