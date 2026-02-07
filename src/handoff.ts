@@ -295,7 +295,7 @@ export async function forceHandoffViaResume(
   try {
     const result = await runner.resumeWithAnswer(sessionId, FORCE_HANDOFF_PROMPT, {
       cwd,
-      maxTurns: 3,
+      maxTurns: 10,
     });
 
     // Check for handoff file first (agent may have used `whs handoff`)

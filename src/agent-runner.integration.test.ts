@@ -90,7 +90,7 @@ describe.skipIf(!shouldRun)("agent-runner integration", () => {
       const result = await sdkRunner.run({
         prompt: "What is 2 + 2? Reply with just the number, nothing else.",
         cwd: tempDir,
-        maxTurns: 1,
+        maxTurns: 10,
       });
 
       // Check for authentication failure
@@ -131,7 +131,7 @@ describe.skipIf(!shouldRun)("agent-runner integration", () => {
       const result = await cliRunner.run({
         prompt: "What is 2 + 2? Reply with just the number, nothing else.",
         cwd: tempDir,
-        maxTurns: 1,
+        maxTurns: 10,
       });
 
       // Check for authentication failure

@@ -163,7 +163,7 @@ export class ClaudeSdkAgentRunner implements AgentRunner {
     if (options.metricsContext?.stepId && !pendingQuestion) {
       try {
         const outcome = success ? "success" : (error || "unknown_error");
-        recordStepComplete(options.metricsContext.stepId, costUsd, outcome);
+        recordStepComplete(options.metricsContext.stepId, costUsd, outcome, turns, options.maxTurns);
       } catch {
         console.warn("Failed to record step metrics");
       }

@@ -115,6 +115,26 @@ describe("metrics", () => {
       ]);
     });
 
+    it("records turns and maxTurns when provided", () => {
+      recordWorkflowStart("wf-turns", "argyn", "bd-a3f8");
+      recordStepStart("step-turns", "wf-turns", "implementation");
+      recordStepComplete("step-turns", 0.05, "pr_created", 23, 50);
+
+      const steps = getWorkflowSteps("wf-turns");
+      expect(steps[0].turns).toBe(23);
+      expect(steps[0].max_turns).toBe(50);
+    });
+
+    it("defaults turns to 0 when not provided", () => {
+      recordWorkflowStart("wf-noturns", "argyn", "bd-a3f8");
+      recordStepStart("step-noturns", "wf-noturns", "implementation");
+      recordStepComplete("step-noturns", 0.05, "done");
+
+      const steps = getWorkflowSteps("wf-noturns");
+      expect(steps[0].turns).toBe(0);
+      expect(steps[0].max_turns).toBe(0);
+    });
+
     it("returns empty array for workflow with no steps", () => {
       recordWorkflowStart("wf-007", "argyn", "bd-a3f8");
       const steps = getWorkflowSteps("wf-007");

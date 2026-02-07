@@ -38,6 +38,8 @@ export interface StepRunRecord {
   started_at: string;
   completed_at: string | null;
   cost: number;
+  turns: number;
+  max_turns: number;
   outcome: string | null;
 }
 
@@ -114,6 +116,8 @@ export function getMetricsDb(): Database.Database {
       started_at TEXT NOT NULL,
       completed_at TEXT,
       cost REAL NOT NULL DEFAULT 0,
+      turns INTEGER NOT NULL DEFAULT 0,
+      max_turns INTEGER NOT NULL DEFAULT 0,
       outcome TEXT,
       FOREIGN KEY (workflow_id) REFERENCES workflow_runs(id)
     );
@@ -123,6 +127,18 @@ export function getMetricsDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_step_workflow ON step_runs(workflow_id);
     CREATE INDEX IF NOT EXISTS idx_step_agent ON step_runs(agent);
   `);
+
+  // Migration: add turns columns if they don't exist (for existing DBs)
+  try {
+    db.exec(`ALTER TABLE step_runs ADD COLUMN turns INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.exec(`ALTER TABLE step_runs ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
 
   return db;
 }
@@ -193,15 +209,17 @@ export function recordStepStart(
 export function recordStepComplete(
   id: string,
   cost: number,
-  outcome: string
+  outcome: string,
+  turns?: number,
+  maxTurns?: number
 ): void {
   const database = getMetricsDb();
   const stmt = database.prepare(`
     UPDATE step_runs
-    SET completed_at = ?, cost = ?, outcome = ?
+    SET completed_at = ?, cost = ?, outcome = ?, turns = ?, max_turns = ?
     WHERE id = ?
   `);
-  stmt.run(new Date().toISOString(), cost, outcome, id);
+  stmt.run(new Date().toISOString(), cost, outcome, turns ?? 0, maxTurns ?? 0, id);
 }
 
 /**

@@ -75,6 +75,8 @@ export class Dispatcher {
   private readonly GRACEFUL_SHUTDOWN_TIMEOUT_MS = 300000; // 5 minutes
   // Max dispatch attempts before circuit breaker trips
   private readonly MAX_DISPATCH_ATTEMPTS = 3;
+  // Max agent turns — if agent uses this many, it likely hit the limit
+  private readonly MAX_AGENT_TURNS = 50;
 
   constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner) {
     this.config = config;
@@ -729,7 +731,7 @@ export class Dispatcher {
       const result = await this.agentRunner.run({
         prompt,
         cwd: work.worktreePath,
-        maxTurns: 50,
+        maxTurns: this.MAX_AGENT_TURNS,
         onOutput: (_text) => {
           // Could stream to notifier here
         },
@@ -753,6 +755,24 @@ export class Dispatcher {
       // Check for pending question
       if (result.pendingQuestion) {
         await this.handlePendingQuestion(work, result);
+        return;
+      }
+
+      // Detect turn limit hit — agent used all available turns without finishing
+      if (result.turns >= this.MAX_AGENT_TURNS) {
+        console.warn(
+          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) — marking BLOCKED`
+        );
+        await this.notifier.notifyProgress(
+          work,
+          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
+        );
+        const blockedHandoff = {
+          next_agent: "BLOCKED",
+          context: `Agent exhausted all ${result.turns} turns without completing. ` +
+            `Output tail: ${result.output.slice(-500)}`,
+        };
+        await this.processHandoff(work, blockedHandoff, result.costUsd);
         return;
       }
 
@@ -788,7 +808,7 @@ export class Dispatcher {
       // Resume the agent session with the answer
       const result = await this.agentRunner.resumeWithAnswer(sessionId, answer, {
         cwd: work.worktreePath,
-        maxTurns: 50,
+        maxTurns: this.MAX_AGENT_TURNS,
         onOutput: (_text) => {
           // Could stream to notifier here
         },
@@ -812,6 +832,24 @@ export class Dispatcher {
       // Check for another pending question
       if (result.pendingQuestion) {
         await this.handlePendingQuestion(work, result);
+        return;
+      }
+
+      // Detect turn limit hit
+      if (result.turns >= this.MAX_AGENT_TURNS) {
+        console.warn(
+          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) — marking BLOCKED`
+        );
+        await this.notifier.notifyProgress(
+          work,
+          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
+        );
+        const blockedHandoff = {
+          next_agent: "BLOCKED",
+          context: `Agent exhausted all ${result.turns} turns without completing. ` +
+            `Output tail: ${result.output.slice(-500)}`,
+        };
+        await this.processHandoff(work, blockedHandoff, result.costUsd);
         return;
       }
 

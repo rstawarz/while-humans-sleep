@@ -458,7 +458,7 @@ describe("getHandoff", () => {
     expect(mockRunner.resumeWithAnswer).toHaveBeenCalledWith(
       "session-1",
       expect.stringContaining("whs handoff"),
-      expect.objectContaining({ cwd: testDir, maxTurns: 3 })
+      expect.objectContaining({ cwd: testDir, maxTurns: 10 })
     );
   });
 
