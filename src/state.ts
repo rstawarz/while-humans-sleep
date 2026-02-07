@@ -6,6 +6,15 @@
  * The .whs/ folder lives in the orchestrator directory.
  *
  * Note: Questions are now tracked as beads in the orchestrator, not in state.
+ *
+ * TODO: Consolidate state.json into beads/steps
+ * Currently we track runtime state (sessionId, worktreePath, costSoFar) in state.json
+ * separately from workflow state in beads. This could be unified by storing:
+ * - sessionId: as a label or in step description metadata
+ * - worktreePath: derivable from workItem id
+ * - costSoFar: in step description or labels
+ * This would eliminate state.json and make beads the single source of truth.
+ * See: https://github.com/anthropics/while_humans_sleep/issues/XXX (if created)
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
