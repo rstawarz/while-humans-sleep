@@ -47,7 +47,8 @@ import {
   clearStepResumeInfo,
 } from "./workflow.js";
 import { ensureWorktree, removeWorktree } from "./worktree.js";
-import { runAgent, formatAgentPrompt, resumeWithAnswer } from "./agent-runner.js";
+import { formatAgentPrompt, type AgentRunner } from "./agent-runner.js";
+import { createAgentRunner } from "./agent-runner-factory.js";
 import { getHandoff, isValidAgent } from "./handoff.js";
 import type { Bead } from "./beads/types.js";
 
@@ -55,6 +56,7 @@ export class Dispatcher {
   private projects: Map<string, Project>;
   private state: DispatcherState;
   private notifier: Notifier;
+  private agentRunner: AgentRunner;
   private running: boolean = false;
   private shuttingDown: boolean = false;
   private tickCount: number = 0;
@@ -68,10 +70,11 @@ export class Dispatcher {
   // Graceful shutdown timeout (wait for agents)
   private readonly GRACEFUL_SHUTDOWN_TIMEOUT_MS = 300000; // 5 minutes
 
-  constructor(config: Config, notifier: Notifier) {
+  constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner) {
     this.config = config;
     this.projects = new Map(config.projects.map((p) => [p.name, p]));
     this.notifier = notifier;
+    this.agentRunner = agentRunner ?? createAgentRunner(config.runnerType);
 
     // Load persisted state for crash recovery
     this.state = loadState();
@@ -185,6 +188,13 @@ export class Dispatcher {
   private forceStop(): void {
     console.log("🛑 Stopping dispatcher...");
     this.running = false;
+
+    // Abort any running agents
+    if (this.runningAgents.size > 0) {
+      console.log(`   Aborting ${this.runningAgents.size} running agent(s)...`);
+      this.agentRunner.abort();
+    }
+
     saveState(this.state);
     releaseLock();
     if (this.shutdownResolve) {
@@ -524,7 +534,8 @@ export class Dispatcher {
 
     try {
       // Run the agent
-      const result = await runAgent(prompt, {
+      const result = await this.agentRunner.run({
+        prompt,
         cwd: work.worktreePath,
         maxTurns: 50,
         onOutput: (_text) => {
@@ -582,7 +593,7 @@ export class Dispatcher {
 
     try {
       // Resume the agent session with the answer
-      const result = await resumeWithAnswer(sessionId, answer, {
+      const result = await this.agentRunner.resumeWithAnswer(sessionId, answer, {
         cwd: work.worktreePath,
         maxTurns: 50,
         onOutput: (_text) => {

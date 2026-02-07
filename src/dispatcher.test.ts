@@ -127,6 +127,7 @@ describe("Dispatcher E2E", () => {
     orchestratorPath: "/home/user/work/whs-orchestrator",
     concurrency: { maxTotal: 4, maxPerProject: 2 },
     notifier: "cli",
+      runnerType: "cli",
   };
 
   const testBead = {
@@ -679,6 +680,7 @@ describe("Agent role mapping", () => {
       orchestratorPath: "/test",
       concurrency: { maxTotal: 4, maxPerProject: 2 },
       notifier: "cli",
+      runnerType: "cli",
     };
 
     const dispatcher = new Dispatcher(config, mockNotifier);
@@ -709,6 +711,7 @@ describe("Graceful shutdown", () => {
     orchestratorPath: "/test",
     concurrency: { maxTotal: 4, maxPerProject: 2 },
     notifier: "cli",
+      runnerType: "cli",
   };
 
   beforeEach(async () => {
@@ -883,6 +886,7 @@ describe("Dispatcher lock file", () => {
     orchestratorPath: "/test",
     concurrency: { maxTotal: 4, maxPerProject: 2 },
     notifier: "cli",
+      runnerType: "cli",
   };
 
   beforeEach(async () => {
