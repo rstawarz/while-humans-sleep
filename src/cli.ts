@@ -31,13 +31,14 @@ import {
   getStatePath,
   getLockInfo,
 } from "./state.js";
+import { VERSION, getVersionString } from "./version.js";
 
 const program = new Command();
 
 program
   .name("whs")
   .description("While Humans Sleep - Multi-project AI agent dispatcher")
-  .version("0.1.0");
+  .version(getVersionString(), "-V, --version", "output version and build time");
 
 /**
  * Checks if WHS is initialized and shows an error if not.
@@ -151,6 +152,8 @@ program
     if (!requireOrchestrator()) {
       process.exit(1);
     }
+
+    console.log(`\n🌙 While Humans Sleep ${getVersionString()}\n`);
 
     const config = loadConfig();
 
@@ -1070,7 +1073,7 @@ program
       // Orchestrator may not be initialized
     }
 
-    console.log("📊 Dispatcher Status\n");
+    console.log(`📊 Dispatcher Status (${getVersionString()})\n`);
 
     // Check if dispatcher is actually running
     if (!lockInfo) {
