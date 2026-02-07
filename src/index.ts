@@ -18,3 +18,4 @@ export * from "./workflow.js";
 export * from "./worktree.js";
 export * from "./metrics.js";
 export * from "./questions.js";
+export * from "./telegram/index.js";

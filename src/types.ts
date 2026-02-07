@@ -19,12 +19,16 @@ export interface Config {
     maxTotal: number;
     maxPerProject: number;
   };
-  notifier: "cli" | "slack";
+  notifier: "cli" | "slack" | "telegram";
   /** Agent runner type: "cli" uses Max subscription, "sdk" uses API (pay-per-token) */
   runnerType: "cli" | "sdk";
   slack?: {
     token: string;
     channelId: string;
+  };
+  telegram?: {
+    botToken: string;
+    chatId: string;
   };
 }
 

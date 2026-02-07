@@ -210,6 +210,10 @@ function validateConfig(parsed: Partial<Config>, configDir: string): Config {
     config.slack = parsed.slack;
   }
 
+  if (parsed.telegram) {
+    config.telegram = parsed.telegram;
+  }
+
   // Validate projects have required fields
   for (const project of config.projects) {
     if (!project.name || !project.repoPath) {
@@ -296,6 +300,37 @@ export function removeProject(name: string, startDir?: string): boolean {
 
   saveConfig(config, startDir);
   return true;
+}
+
+/**
+ * Updates the config with partial values
+ *
+ * @param updates - Partial config to merge
+ * @param startDir - Directory to start searching for config (defaults to cwd)
+ */
+export function updateConfig(
+  updates: Partial<Omit<Config, "projects" | "orchestratorPath">>,
+  startDir?: string
+): void {
+  const config = loadConfig(startDir);
+
+  if (updates.concurrency !== undefined) {
+    config.concurrency = { ...config.concurrency, ...updates.concurrency };
+  }
+  if (updates.notifier !== undefined) {
+    config.notifier = updates.notifier;
+  }
+  if (updates.runnerType !== undefined) {
+    config.runnerType = updates.runnerType;
+  }
+  if (updates.slack !== undefined) {
+    config.slack = updates.slack;
+  }
+  if (updates.telegram !== undefined) {
+    config.telegram = updates.telegram;
+  }
+
+  saveConfig(config, startDir);
 }
 
 /**

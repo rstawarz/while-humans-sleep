@@ -177,7 +177,28 @@ program
 
     console.log("");
 
-    const notifier = new CLINotifier();
+    // Set up notifier (CLI or Telegram)
+    let notifier: import("./types.js").Notifier;
+    let telegramService: import("./telegram/index.js").TelegramService | null = null;
+
+    if (config.telegram?.botToken && config.telegram?.chatId) {
+      // Use Telegram notifier
+      const { TelegramService } = await import("./telegram/index.js");
+      telegramService = new TelegramService(
+        config.telegram.botToken,
+        config.telegram.chatId
+      );
+      notifier = telegramService;
+      await telegramService.start();
+      console.log("  Telegram bot started");
+    } else {
+      // Use CLI notifier
+      notifier = new CLINotifier();
+      if (config.notifier === "telegram") {
+        console.log("  Telegram not configured. Run `whs telegram setup` to enable.");
+      }
+    }
+
     const dispatcher = new Dispatcher(config, notifier);
 
     // Handle graceful shutdown (Ctrl+C or kill)
@@ -185,6 +206,10 @@ program
     // Second signal: force stop
     const handleShutdown = async () => {
       await dispatcher.requestShutdown();
+      if (telegramService) {
+        await telegramService.stop();
+        console.log("  Telegram bot stopped");
+      }
       process.exit(0);
     };
 
@@ -1329,6 +1354,102 @@ program
 
     // Interactive flow
     await setupClaudeAuth(configDir);
+  });
+
+// Telegram subcommand
+const telegramCmd = program
+  .command("telegram")
+  .description("Telegram integration commands");
+
+telegramCmd
+  .command("setup")
+  .description("Configure Telegram bot for notifications and question answering")
+  .action(async () => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { createInterface } = await import("readline");
+    const { runSetupWizard } = await import("./telegram/index.js");
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const ask = (prompt: string): Promise<string> => {
+      return new Promise((resolve) => {
+        rl.question(prompt, (answer) => resolve(answer.trim()));
+      });
+    };
+
+    try {
+      const success = await runSetupWizard(ask);
+      if (!success) {
+        process.exit(1);
+      }
+    } finally {
+      rl.close();
+    }
+  });
+
+telegramCmd
+  .command("status")
+  .description("Show Telegram integration status")
+  .action(() => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+
+    console.log("\n  Telegram Integration Status\n");
+
+    if (!config.telegram?.botToken || !config.telegram?.chatId) {
+      console.log("  Not configured.");
+      console.log("  Run 'whs telegram setup' to configure.\n");
+      return;
+    }
+
+    console.log("  Configured:");
+    console.log(`    Chat ID: ${config.telegram.chatId}`);
+    console.log(`    Token: ${config.telegram.botToken.slice(0, 10)}...`);
+    console.log(`    Notifier: ${config.notifier}`);
+    console.log("");
+  });
+
+telegramCmd
+  .command("disable")
+  .description("Disable Telegram notifications (switch to CLI)")
+  .action(() => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { updateConfig } = require("./config.js");
+    updateConfig({ notifier: "cli" });
+    console.log("  Telegram notifications disabled. Using CLI notifier.\n");
+  });
+
+telegramCmd
+  .command("enable")
+  .description("Enable Telegram notifications")
+  .action(() => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+
+    if (!config.telegram?.botToken || !config.telegram?.chatId) {
+      console.log("  Telegram not configured.");
+      console.log("  Run 'whs telegram setup' first.\n");
+      process.exit(1);
+    }
+
+    const { updateConfig } = require("./config.js");
+    updateConfig({ notifier: "telegram" });
+    console.log("  Telegram notifications enabled.\n");
   });
 
 program.parse();

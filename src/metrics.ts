@@ -77,8 +77,9 @@ export function initDb(dbPath?: string): void {
 
 /**
  * Gets or creates the database connection
+ * Exported for use by other modules (e.g., Telegram message store)
  */
-function getDb(): Database.Database {
+export function getMetricsDb(): Database.Database {
   if (db) return db;
 
   const dbPath = customDbPath || DEFAULT_DB_PATH;
@@ -134,7 +135,7 @@ export function recordWorkflowStart(
   project: string,
   sourceBead: string
 ): void {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     INSERT INTO workflow_runs (id, project, source_bead, started_at, status, total_cost)
     VALUES (?, ?, ?, ?, 'running', 0)
@@ -150,7 +151,7 @@ export function recordWorkflowComplete(
   status: "done" | "blocked" | "error",
   totalCost?: number
 ): void {
-  const database = getDb();
+  const database = getMetricsDb();
 
   // If totalCost not provided, sum from steps
   let cost = totalCost;
@@ -178,7 +179,7 @@ export function recordStepStart(
   workflowId: string,
   agent: string
 ): void {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     INSERT INTO step_runs (id, workflow_id, agent, started_at, cost)
     VALUES (?, ?, ?, ?, 0)
@@ -194,7 +195,7 @@ export function recordStepComplete(
   cost: number,
   outcome: string
 ): void {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     UPDATE step_runs
     SET completed_at = ?, cost = ?, outcome = ?
@@ -207,7 +208,7 @@ export function recordStepComplete(
  * Gets a workflow by ID
  */
 export function getWorkflow(id: string): WorkflowRunRecord | null {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`SELECT * FROM workflow_runs WHERE id = ?`);
   return (stmt.get(id) as WorkflowRunRecord) || null;
 }
@@ -216,7 +217,7 @@ export function getWorkflow(id: string): WorkflowRunRecord | null {
  * Gets all steps for a workflow
  */
 export function getWorkflowSteps(workflowId: string): StepRunRecord[] {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT * FROM step_runs WHERE workflow_id = ? ORDER BY started_at
   `);
@@ -227,7 +228,7 @@ export function getWorkflowSteps(workflowId: string): StepRunRecord[] {
  * Gets metrics aggregated by project
  */
 export function getProjectMetrics(): ProjectMetrics[] {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT
       w.project,
@@ -251,7 +252,7 @@ export function getProjectMetrics(): ProjectMetrics[] {
  * Gets metrics aggregated by agent type
  */
 export function getAgentMetrics(): AgentMetrics[] {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT
       agent,
@@ -273,7 +274,7 @@ export function getAgentMetrics(): AgentMetrics[] {
  * Gets recent workflows
  */
 export function getRecentWorkflows(limit: number = 10): WorkflowRunRecord[] {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT * FROM workflow_runs
     ORDER BY started_at DESC
@@ -286,7 +287,7 @@ export function getRecentWorkflows(limit: number = 10): WorkflowRunRecord[] {
  * Gets running workflows
  */
 export function getRunningWorkflows(): WorkflowRunRecord[] {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT * FROM workflow_runs WHERE status = 'running' ORDER BY started_at
   `);
@@ -297,7 +298,7 @@ export function getRunningWorkflows(): WorkflowRunRecord[] {
  * Gets total cost across all workflows
  */
 export function getTotalCost(): number {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT COALESCE(SUM(cost), 0) as total FROM step_runs
   `);
@@ -309,7 +310,7 @@ export function getTotalCost(): number {
  * Gets cost for a specific time period
  */
 export function getCostForPeriod(startDate: Date, endDate: Date): number {
-  const database = getDb();
+  const database = getMetricsDb();
   const stmt = database.prepare(`
     SELECT COALESCE(SUM(cost), 0) as total
     FROM step_runs
@@ -362,7 +363,7 @@ export function closeDb(): void {
  * Clears all metrics data (useful for testing)
  */
 export function clearMetrics(): void {
-  const database = getDb();
+  const database = getMetricsDb();
   database.exec(`
     DELETE FROM step_runs;
     DELETE FROM workflow_runs;
