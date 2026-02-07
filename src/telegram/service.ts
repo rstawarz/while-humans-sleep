@@ -190,7 +190,8 @@ export class TelegramService implements Notifier {
   async notifyComplete(work: ActiveWork, result: "done" | "blocked"): Promise<void> {
     // Phase 2: Completion notifications
     const emoji = result === "done" ? "\u2705" : "\u26D4";
-    const message = `${emoji} *${result.toUpperCase()}*: ${escapeMarkdownV2(work.workItem.project)}/${escapeMarkdownV2(work.workItem.id)}\nAgent: ${escapeMarkdownV2(work.agent)}\nCost: \\$${work.costSoFar.toFixed(4)}`;
+    const message = `${emoji} *${result.toUpperCase()}*: ${escapeMarkdownV2(work.workItem.project)}/${escapeMarkdownV2(work.workItem.id)}\nAgent: ${escapeMarkdownV2(work.agent)}\nCost: ${escapeMarkdownV2(`$${work.costSoFar.toFixed(4)}`)}`;
+
 
     try {
       await this.sendMessage(message, { parse_mode: "MarkdownV2" });
