@@ -1,15 +1,22 @@
 /**
- * Agent Runner - Claude Agent SDK wrapper
+ * Agent Runner Utilities
  *
- * Runs agents via the Claude Agent SDK, handling streaming output,
- * session management, cost tracking, and AskUserQuestion tool calls.
+ * Shared utilities for agent runners including safety hooks, validation,
+ * and prompt formatting. The actual runner implementations are in:
+ * - cli-agent-runner.ts (uses claude CLI, runs on Max subscription)
+ * - claude-sdk-agent-runner.ts (uses Claude Agent SDK, pay-per-token)
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { Question } from "./types.js";
-import { recordStepComplete } from "./metrics.js";
-import { loadWhsEnv } from "./config.js";
 import { resolve, relative, isAbsolute } from "path";
+
+// Re-export types from the interface for backward compatibility
+export type {
+  AgentRunner,
+  AgentRunOptions,
+  AgentRunResult,
+  AgentRunnerFactory,
+  AgentRunnerType,
+} from "./agent-runner-interface.js";
 
 // Re-export SDK types we need
 export type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -142,41 +149,6 @@ export function createFileSafetyHook(worktreePath: string): (input: { file_path?
 }
 
 /**
- * Tracking state for metrics recording
- */
-interface MetricsContext {
-  stepId?: string;
-  workflowId?: string;
-  agent?: string;
-}
-
-/**
- * Options for running an agent
- */
-export interface RunAgentOptions {
-  /** Path to agent definition markdown file (optional, uses systemPrompt if not provided) */
-  agentFile?: string;
-  /** Custom system prompt (used if agentFile not provided) */
-  systemPrompt?: string;
-  /** Working directory for the agent */
-  cwd: string;
-  /** Maximum turns before stopping */
-  maxTurns?: number;
-  /** Session ID to resume (for continuing after questions) */
-  resume?: string;
-  /** Allowed tools (defaults to all) */
-  allowedTools?: string[];
-  /** Callback for streaming output */
-  onOutput?: (text: string) => void;
-  /** Callback for tool use */
-  onToolUse?: (toolName: string, input: unknown) => void;
-  /** Enable safety hooks (blocks dangerous commands, worktree escaping) */
-  enableSafetyHooks?: boolean;
-  /** Metrics context for recording step completion */
-  metricsContext?: MetricsContext;
-}
-
-/**
  * Auth error patterns to detect
  */
 const AUTH_ERROR_PATTERNS = [
@@ -194,193 +166,6 @@ const AUTH_ERROR_PATTERNS = [
  */
 export function isAuthenticationError(text: string): boolean {
   return AUTH_ERROR_PATTERNS.some(pattern => pattern.test(text));
-}
-
-/**
- * Result of running an agent
- */
-export interface AgentRunResult {
-  /** Session ID for resumption */
-  sessionId: string;
-  /** Collected text output from the agent */
-  output: string;
-  /** Total cost in USD */
-  costUsd: number;
-  /** Number of turns taken */
-  turns: number;
-  /** Duration in milliseconds */
-  durationMs: number;
-  /** Whether the agent completed successfully */
-  success: boolean;
-  /** Error message if failed */
-  error?: string;
-  /** Whether the error was an authentication failure (requires human intervention) */
-  isAuthError?: boolean;
-  /** Pending question if agent asked for user input */
-  pendingQuestion?: {
-    questions: Question[];
-    context: string;
-  };
-}
-
-/**
- * Runs an agent via the Claude Agent SDK
- */
-export async function runAgent(
-  prompt: string,
-  options: RunAgentOptions
-): Promise<AgentRunResult> {
-  let sessionId = options.resume || "";
-  let output = "";
-  let costUsd = 0;
-  let turns = 0;
-  let durationMs = 0;
-  let success = true;
-  let error: string | undefined;
-  let pendingQuestion: AgentRunResult["pendingQuestion"] | undefined;
-
-  try {
-    // Build hooks if safety is enabled
-    const hooks = options.enableSafetyHooks !== false ? buildHooks(options.cwd) : undefined;
-
-    // Load environment with WHS credentials (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)
-    // Use process.cwd() (orchestrator dir) not options.cwd (worktree) since .whs/.env is in orchestrator
-    const env = loadWhsEnv();
-
-    const queryOptions: Parameters<typeof query>[0]["options"] = {
-      cwd: options.cwd,
-      // Pass environment with WHS credentials
-      env,
-      // Load user settings (for credentials) and project settings (CLAUDE.md)
-      settingSources: ["user", "project"],
-      // Use Claude Code's system prompt as base, append custom if provided
-      systemPrompt: options.systemPrompt
-        ? { type: "preset", preset: "claude_code", append: options.systemPrompt }
-        : { type: "preset", preset: "claude_code" },
-      // Use Claude Code's default tools
-      tools: { type: "preset", preset: "claude_code" },
-      // Allow all tools by default, or restrict if specified
-      allowedTools: options.allowedTools,
-      // Maximum turns
-      maxTurns: options.maxTurns ?? 50,
-      // Resume session if provided
-      resume: options.resume,
-      // Bypass permissions for automated operation
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      // Safety hooks
-      hooks,
-    };
-
-    // Stream messages from the agent
-    for await (const message of query({ prompt, options: queryOptions })) {
-      // Handle different message types
-      switch (message.type) {
-        case "system":
-          if (message.subtype === "init") {
-            sessionId = message.session_id;
-          }
-          break;
-
-        case "assistant":
-          // Check for authentication/API errors on the message itself
-          // The SDK can return error: "authentication_failed" etc. on assistant messages
-          if (message.error) {
-            success = false;
-            error = `SDK error: ${message.error}`;
-            // Don't break - continue to extract any text for debugging
-          }
-
-          // Extract text content from assistant messages
-          if (message.message?.content) {
-            for (const block of message.message.content) {
-              if ("text" in block && block.text) {
-                output += block.text + "\n";
-                options.onOutput?.(block.text);
-              } else if ("name" in block) {
-                // Tool use block
-                const toolName = block.name;
-                const toolInput = "input" in block ? block.input : undefined;
-                options.onToolUse?.(toolName, toolInput);
-
-                // Check for AskUserQuestion tool
-                if (toolName === "AskUserQuestion" && toolInput) {
-                  const input = toolInput as {
-                    questions?: Question[];
-                    answers?: Record<string, string>;
-                  };
-
-                  // If no answers yet, this is a pending question
-                  if (input.questions && !input.answers) {
-                    pendingQuestion = {
-                      questions: input.questions,
-                      context: output.slice(-500), // Last 500 chars for context
-                    };
-                  }
-                }
-              }
-            }
-          }
-          break;
-
-        case "result":
-          // Final result message
-          costUsd = message.total_cost_usd;
-          turns = message.num_turns;
-          durationMs = message.duration_ms;
-          success = message.subtype === "success";
-
-          if (message.subtype !== "success" && "errors" in message) {
-            error = message.errors?.join("; ");
-          }
-          break;
-      }
-    }
-  } catch (err) {
-    const errMessage = err instanceof Error ? err.message : String(err);
-    success = false;
-    error = errMessage;
-  }
-
-  // Record metrics if context provided
-  if (options.metricsContext?.stepId && !pendingQuestion) {
-    try {
-      const outcome = success ? "success" : (error || "unknown_error");
-      recordStepComplete(options.metricsContext.stepId, costUsd, outcome);
-    } catch {
-      // Don't fail the run if metrics recording fails
-      console.warn("Failed to record step metrics");
-    }
-  }
-
-  // Check for auth errors in output or error message
-  const isAuthError = isAuthenticationError(output) || (error ? isAuthenticationError(error) : false);
-
-  return {
-    sessionId,
-    output: output.trim(),
-    costUsd,
-    turns,
-    durationMs,
-    success,
-    error,
-    isAuthError,
-    pendingQuestion,
-  };
-}
-
-/**
- * Resumes an agent session with an answer to a question
- */
-export async function resumeWithAnswer(
-  sessionId: string,
-  answer: string,
-  options: Omit<RunAgentOptions, "resume">
-): Promise<AgentRunResult> {
-  return runAgent(answer, {
-    ...options,
-    resume: sessionId,
-  });
 }
 
 /**
@@ -432,48 +217,6 @@ export function formatAgentPrompt(params: {
   lines.push("- BLOCKED - when human intervention needed");
 
   return lines.join("\n");
-}
-
-/**
- * Builds the hooks configuration for the SDK
- * Note: This returns a hooks object compatible with the Claude Agent SDK
- */
-function buildHooks(worktreePath: string): Record<string, unknown> {
-  const bashHook = createBashSafetyHook(worktreePath);
-  const fileHook = createFileSafetyHook(worktreePath);
-
-  return {
-    PreToolUse: [
-      {
-        // Hook for Bash commands
-        matcher: /^Bash$/,
-        hooks: [
-          async ({ toolInput }: { toolInput: { command?: string } }) => {
-            if (!toolInput.command) return {};
-            return bashHook({ command: toolInput.command });
-          },
-        ],
-      },
-      {
-        // Hook for Write tool
-        matcher: /^Write$/,
-        hooks: [
-          async ({ toolInput }: { toolInput: { file_path?: string } }) => {
-            return fileHook(toolInput);
-          },
-        ],
-      },
-      {
-        // Hook for Edit tool
-        matcher: /^Edit$/,
-        hooks: [
-          async ({ toolInput }: { toolInput: { file_path?: string } }) => {
-            return fileHook(toolInput);
-          },
-        ],
-      },
-    ],
-  };
 }
 
 /**

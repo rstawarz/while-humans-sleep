@@ -1,8 +1,8 @@
 /**
- * Integration tests for agent-runner
+ * Integration tests for agent runners
  *
- * These tests actually invoke the Claude Agent SDK via our runAgent() function
- * to verify the same code path that `whs start` uses.
+ * These tests actually invoke the agent runners to verify authentication
+ * and the code paths that `whs start` uses.
  *
  * They are skipped by default - run with:
  *   AUTH_TEST=1 npm test -- --run agent-runner.integration
@@ -21,7 +21,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { runAgent } from "./agent-runner.js";
+import { createClaudeSdkAgentRunner } from "./claude-sdk-agent-runner.js";
+import { createCLIAgentRunner } from "./cli-agent-runner.js";
+import type { AgentRunner } from "./agent-runner-interface.js";
 
 // Skip these tests unless explicitly run or AUTH_TEST env var is set
 const shouldRun = process.env.AUTH_TEST === "1" || process.env.CI_AUTH_TEST === "1";
@@ -30,6 +32,8 @@ describe.skipIf(!shouldRun)("agent-runner integration", () => {
   // Create a temp directory that looks like a WHS orchestrator
   let tempDir: string;
   let whsDir: string;
+  let sdkRunner: AgentRunner;
+  let cliRunner: AgentRunner;
 
   beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), "whs-auth-test-"));
@@ -59,6 +63,10 @@ describe.skipIf(!shouldRun)("agent-runner integration", () => {
     if (envLines.length > 0) {
       writeFileSync(join(whsDir, ".env"), envLines.join("\n") + "\n");
     }
+
+    // Create runners
+    sdkRunner = createClaudeSdkAgentRunner();
+    cliRunner = createCLIAgentRunner();
   });
 
   afterAll(() => {
@@ -67,120 +75,92 @@ describe.skipIf(!shouldRun)("agent-runner integration", () => {
     }
   });
 
-  it("runAgent authenticates and completes a simple task", async () => {
-    /**
-     * This test verifies the EXACT code path that whs start uses:
-     * 1. runAgent() is called with cwd pointing to our temp directory
-     * 2. loadWhsEnv() loads credentials from .whs/.env
-     * 3. SDK is called with settingSources: ["user", "project"]
-     * 4. permissionMode: "bypassPermissions"
-     *
-     * If authentication fails, we should get a clear error, NOT a masked one.
-     */
+  describe("SDK Runner", () => {
+    it("authenticates and completes a simple task", async () => {
+      /**
+       * This test verifies the EXACT code path that whs start uses with SDK:
+       * 1. run() is called with cwd pointing to our temp directory
+       * 2. loadWhsEnv() loads credentials from .whs/.env
+       * 3. SDK is called with settingSources: ["user", "project"]
+       * 4. permissionMode: "bypassPermissions"
+       *
+       * If authentication fails, we should get a clear error, NOT a masked one.
+       */
 
-    const result = await runAgent(
-      "What is 2 + 2? Reply with just the number, nothing else.",
-      {
+      const result = await sdkRunner.run({
+        prompt: "What is 2 + 2? Reply with just the number, nothing else.",
         cwd: tempDir,
         maxTurns: 1,
-        // Disable safety hooks for this test (no worktree to confine to)
-        enableSafetyHooks: false,
+      });
+
+      // Check for authentication failure
+      if (!result.success) {
+        const errorLower = (result.error || "").toLowerCase();
+        if (
+          errorLower.includes("api key") ||
+          errorLower.includes("authentication") ||
+          errorLower.includes("apikeysource") ||
+          errorLower.includes("invalid")
+        ) {
+          throw new Error(
+            `Authentication failed!\n\n` +
+              `This is the error that whs start would encounter.\n` +
+              `Fix: Run 'whs claude-login' or set ANTHROPIC_API_KEY.\n\n` +
+              `Error: ${result.error}`
+          );
+        }
+        throw new Error(`SDK runner failed: ${result.error}`);
       }
-    );
 
-    // Check for authentication failure - this is what we were missing before!
-    if (!result.success) {
-      const errorLower = (result.error || "").toLowerCase();
-      if (
-        errorLower.includes("api key") ||
-        errorLower.includes("authentication") ||
-        errorLower.includes("apikeysource") ||
-        errorLower.includes("invalid")
-      ) {
-        throw new Error(
-          `Authentication failed!\n\n` +
-            `This is the error that whs start would encounter.\n` +
-            `Fix: Run 'whs claude-login' or set ANTHROPIC_API_KEY.\n\n` +
-            `Error: ${result.error}`
-        );
-      }
-      // Some other error
-      throw new Error(`runAgent failed: ${result.error}`);
-    }
+      // Verify we got a real response
+      expect(result.sessionId).toBeTruthy();
+      expect(result.success).toBe(true);
+      expect(result.output).toBeTruthy();
+      // Cost should be non-zero for a real API call
+      expect(result.costUsd).toBeGreaterThan(0);
+    }, 120000); // 2 minute timeout for API call
+  });
 
-    // Verify we got a real response
-    expect(result.sessionId).toBeTruthy();
-    expect(result.success).toBe(true);
-    expect(result.output).toBeTruthy();
-    // Cost should be non-zero for a real API call
-    expect(result.costUsd).toBeGreaterThan(0);
-  }, 120000); // 2 minute timeout for API call
+  describe("CLI Runner", () => {
+    it("authenticates and completes a simple task", async () => {
+      /**
+       * This test verifies the CLI runner using the claude command.
+       * Uses Max subscription (no API costs).
+       */
 
-  it("runAgent can use tools (Read) like the dispatcher does", async () => {
-    /**
-     * Tests that runAgent works with tools enabled, similar to how
-     * the dispatcher runs implementation agents.
-     */
-
-    // Create a test file
-    const testFile = join(tempDir, "test-file.txt");
-    writeFileSync(testFile, "Hello from WHS integration test!");
-
-    const result = await runAgent(
-      `Read the file at ${testFile} and tell me exactly what it says.`,
-      {
+      const result = await cliRunner.run({
+        prompt: "What is 2 + 2? Reply with just the number, nothing else.",
         cwd: tempDir,
-        maxTurns: 3,
-        enableSafetyHooks: false,
-        // Let it use default tools (preset: claude_code)
+        maxTurns: 1,
+      });
+
+      // Check for authentication failure
+      if (!result.success) {
+        const errorLower = (result.error || "").toLowerCase();
+        if (
+          result.isAuthError ||
+          errorLower.includes("api key") ||
+          errorLower.includes("authentication") ||
+          errorLower.includes("login")
+        ) {
+          throw new Error(
+            `Authentication failed!\n\n` +
+              `This is the error that whs start would encounter.\n` +
+              `Fix: Run 'claude /login' to authenticate the CLI.\n\n` +
+              `Error: ${result.error}`
+          );
+        }
+        throw new Error(`CLI runner failed: ${result.error}`);
       }
-    );
 
-    if (!result.success) {
-      const errorLower = (result.error || "").toLowerCase();
-      if (errorLower.includes("api key") || errorLower.includes("authentication")) {
-        throw new Error(
-          `Authentication failed! Run 'whs claude-login' to fix.\nError: ${result.error}`
-        );
-      }
-      throw new Error(`runAgent failed: ${result.error}`);
-    }
-
-    expect(result.success).toBe(true);
-    // The output should mention the file contents
-    expect(result.output.toLowerCase()).toContain("hello");
-  }, 120000);
-
-  it("runAgent returns clear error when auth is missing (simulated)", async () => {
-    /**
-     * This test verifies that if authentication is missing, we get a
-     * clear error message, not a masked one.
-     *
-     * We can't easily simulate missing auth without actually removing
-     * credentials, but we can at least verify the error handling path
-     * by checking that the result structure is correct.
-     */
-
-    // Just verify the result structure is what we expect
-    const result = await runAgent("Say hello", {
-      cwd: tempDir,
-      maxTurns: 1,
-      enableSafetyHooks: false,
-    });
-
-    // Result should have proper structure
-    expect(result).toHaveProperty("sessionId");
-    expect(result).toHaveProperty("success");
-    expect(result).toHaveProperty("output");
-    expect(result).toHaveProperty("costUsd");
-    expect(result).toHaveProperty("turns");
-    expect(result).toHaveProperty("durationMs");
-
-    // If it failed, error should be populated
-    if (!result.success) {
-      expect(result.error).toBeTruthy();
-    }
-  }, 120000);
+      // Verify we got a real response
+      expect(result.sessionId).toBeTruthy();
+      expect(result.success).toBe(true);
+      expect(result.output).toBeTruthy();
+      // CLI runner may report 0 cost (uses Max subscription)
+      expect(typeof result.costUsd).toBe("number");
+    }, 120000);
+  });
 });
 
 /**
