@@ -125,6 +125,12 @@ export class Dispatcher {
 
     this.running = true;
 
+    // Pause/resume signal handlers (used by `whs pause` and `whs resume`)
+    const onPause = (): void => { this.pause(); };
+    const onResume = (): void => { this.resume(); };
+    process.on("SIGUSR1", onPause);
+    process.on("SIGUSR2", onResume);
+
     while (this.running) {
       if (!this.state.paused) {
         try {
@@ -196,6 +202,10 @@ export class Dispatcher {
   private forceStop(): void {
     console.log("🛑 Stopping dispatcher...");
     this.running = false;
+
+    // Remove signal handlers
+    process.removeAllListeners("SIGUSR1");
+    process.removeAllListeners("SIGUSR2");
 
     // Abort any running agents
     if (this.runningAgents.size > 0) {

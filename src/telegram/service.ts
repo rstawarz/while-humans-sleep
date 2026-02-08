@@ -12,6 +12,7 @@ import type { Context } from "grammy";
 import type { TelegramHandler } from "./handlers/types.js";
 import { MessageStore } from "./message-store.js";
 import { QuestionHandler } from "./handlers/question.js";
+import { CommandHandler } from "./handlers/command.js";
 import { beads } from "../beads/index.js";
 import { loadConfig, expandPath } from "../config.js";
 import { escapeMarkdownV2 } from "./formatter.js";
@@ -40,7 +41,8 @@ export class TelegramService implements Notifier {
     this.messageStore = new MessageStore();
     this.questionHandler = new QuestionHandler(this.messageStore, chatId);
 
-    // Register the question handler by default
+    // Register handlers in priority order (commands first, then questions)
+    this.registerHandler(new CommandHandler());
     this.registerHandler(this.questionHandler);
 
     // Set up message routing

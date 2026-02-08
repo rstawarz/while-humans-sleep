@@ -1224,18 +1224,39 @@ program
 
 program
   .command("pause")
-  .description("Pause the dispatcher")
+  .description("Pause the dispatcher (running agents finish, no new work picked up)")
   .action(async () => {
-    // TODO: Signal running dispatcher to pause
-    console.log("⚠️  Not implemented yet");
+    const lockInfo = getLockInfo();
+    if (!lockInfo) {
+      console.log("No dispatcher is running.");
+      process.exit(1);
+    }
+    const state = loadState();
+    if (state.paused) {
+      console.log("Dispatcher is already paused.");
+      return;
+    }
+    process.kill(lockInfo.pid, "SIGUSR1");
+    console.log("Dispatcher paused. Running agents will finish, no new work picked up.");
+    console.log("   Run 'whs resume' to continue.");
   });
 
 program
   .command("resume")
-  .description("Resume the dispatcher")
+  .description("Resume the dispatcher after a pause")
   .action(async () => {
-    // TODO: Signal running dispatcher to resume
-    console.log("⚠️  Not implemented yet");
+    const lockInfo = getLockInfo();
+    if (!lockInfo) {
+      console.log("No dispatcher is running.");
+      process.exit(1);
+    }
+    const state = loadState();
+    if (!state.paused) {
+      console.log("Dispatcher is not paused.");
+      return;
+    }
+    process.kill(lockInfo.pid, "SIGUSR2");
+    console.log("Dispatcher resumed.");
   });
 
 program

@@ -5,6 +5,17 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-08
+
+### Added
+- **Pause/Resume commands**: `whs pause` and `whs resume` CLI commands to control the running dispatcher
+  - Signal-based: sends SIGUSR1/SIGUSR2 to dispatcher process (follows existing `whs stop` pattern)
+  - Dispatcher registers signal handlers on start, cleans them up on shutdown
+  - Guards against already-paused/not-paused states
+- **Telegram commands**: `/pause`, `/resume`, `/status` bot commands for remote dispatcher control
+  - CommandHandler registered before QuestionHandler so commands take priority
+  - `/status` shows running/paused state, PID, and active work count
+
 ## [0.3.1] - 2025-02-07
 
 ### Fixed

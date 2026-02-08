@@ -10,6 +10,7 @@
 export { TelegramService, createTelegramService } from "./service.js";
 export { MessageStore } from "./message-store.js";
 export { QuestionHandler } from "./handlers/question.js";
+export { CommandHandler } from "./handlers/command.js";
 export { runSetupWizard, validateTelegramConfig, loadBotToken } from "./setup.js";
 export {
   formatQuestionMessage,
