@@ -63,6 +63,7 @@ export class Dispatcher {
   private agentRunner: AgentRunner;
   private running: boolean = false;
   private shuttingDown: boolean = false;
+  private preflightNeeded: boolean = false;
   private tickCount: number = 0;
   private runningAgents: Map<string, Promise<void>> = new Map();
   private shutdownResolve: (() => void) | null = null;
@@ -123,6 +124,28 @@ export class Dispatcher {
     }
     console.log("");
 
+    // Verify agent auth/connectivity before starting the tick loop
+    try {
+      await this.runPreflightCheck();
+    } catch (err) {
+      releaseLock();
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.toLowerCase().includes("auth")) {
+        console.error("\n" + "=".repeat(60));
+        console.error("🔐 PREFLIGHT FAILED — AUTHENTICATION ERROR");
+        console.error("=".repeat(60));
+        console.error(`\nError: ${message}`);
+        console.error("\nPlease fix authentication before starting:");
+        console.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
+        console.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
+        console.error("=".repeat(60) + "\n");
+      } else {
+        console.error(`\n❌ Preflight check failed: ${message}`);
+        console.error("   The dispatcher cannot start without a working agent connection.\n");
+      }
+      throw err;
+    }
+
     this.running = true;
 
     // Pause/resume signal handlers (used by `whs pause` and `whs resume`)
@@ -132,6 +155,23 @@ export class Dispatcher {
     process.on("SIGUSR2", onResume);
 
     while (this.running) {
+      // Run preflight check after resume before first tick
+      if (this.preflightNeeded) {
+        this.preflightNeeded = false;
+        try {
+          await this.runPreflightCheck();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`❌ Preflight check failed after resume: ${message}`);
+          this.pause();
+          await this.notifier.notifyRateLimit(
+            new Error(`Preflight check failed: ${message}`)
+          );
+          await this.sleep(5000);
+          continue;
+        }
+      }
+
       if (!this.state.paused) {
         try {
           await this.tick();
@@ -247,8 +287,37 @@ export class Dispatcher {
   }
 
   resume(): void {
+    this.preflightNeeded = true;
     this.state = setPaused(this.state, false);
-    console.log("▶️  Dispatcher resumed");
+    console.log("▶️  Dispatcher resumed (preflight pending)");
+  }
+
+  /**
+   * Runs a minimal agent invocation to verify auth/connectivity.
+   *
+   * Called before the tick loop on start(), and after resume() before the
+   * first tick. Throws on failure — caller decides how to handle it.
+   */
+  async runPreflightCheck(): Promise<void> {
+    console.log("🔍 Running preflight check...");
+
+    const orchestratorPath = expandPath(this.config.orchestratorPath);
+
+    const result = await this.agentRunner.run({
+      prompt: "Respond with exactly: PREFLIGHT_OK",
+      cwd: orchestratorPath,
+      maxTurns: 1,
+    });
+
+    if (result.isAuthError) {
+      throw new Error(`Authentication failed: ${result.error || "unknown auth error"}`);
+    }
+
+    if (!result.success) {
+      throw new Error(`Preflight check failed: ${result.error || "agent returned unsuccessful result"}`);
+    }
+
+    console.log("✅ Preflight check passed");
   }
 
   /**

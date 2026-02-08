@@ -1360,3 +1360,133 @@ describe("Circuit breaker on dispatch failure", () => {
     expect(mockState.removeActiveWork).toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// Preflight Check Tests
+// ============================================================
+
+describe("Preflight check", () => {
+  let mockState: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [],
+    orchestratorPath: "/test",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("runPreflightCheck succeeds on valid auth", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "preflight-session",
+      output: "PREFLIGHT_OK",
+      costUsd: 0.001,
+      turns: 1,
+      durationMs: 500,
+      success: true,
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    await expect(dispatcher.runPreflightCheck()).resolves.toBeUndefined();
+
+    expect(mockAgentRunnerInstance.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Respond with exactly: PREFLIGHT_OK",
+        maxTurns: 1,
+      })
+    );
+  });
+
+  it("runPreflightCheck throws on auth failure", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "",
+      output: "",
+      costUsd: 0,
+      turns: 0,
+      durationMs: 100,
+      success: false,
+      isAuthError: true,
+      error: "OAuth token expired",
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Authentication failed");
+  });
+
+  it("runPreflightCheck throws on generic failure", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "",
+      output: "",
+      costUsd: 0,
+      turns: 0,
+      durationMs: 100,
+      success: false,
+      error: "Connection refused",
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Preflight check failed");
+  });
+
+  it("runPreflightCheck throws when agent runner throws", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockAgentRunnerInstance.run.mockRejectedValue(new Error("Network timeout"));
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Network timeout");
+  });
+
+  it("start() releases lock on preflight failure", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockState.getLockInfo.mockReturnValue(null);
+    mockState.acquireLock.mockReturnValue(true);
+
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "",
+      output: "",
+      costUsd: 0,
+      turns: 0,
+      durationMs: 100,
+      success: false,
+      isAuthError: true,
+      error: "OAuth token expired",
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    await expect(dispatcher.start()).rejects.toThrow("Authentication failed");
+    expect(mockState.releaseLock).toHaveBeenCalled();
+  });
+
+  it("resume sets preflightNeeded flag", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    dispatcher.resume();
+
+    expect((dispatcher as any).preflightNeeded).toBe(true);
+    expect(mockState.setPaused).toHaveBeenCalledWith(expect.any(Object), false);
+  });
+});
