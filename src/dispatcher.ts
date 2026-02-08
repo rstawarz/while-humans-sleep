@@ -63,6 +63,7 @@ export class Dispatcher {
   private projects: Map<string, Project>;
   private state: DispatcherState;
   private notifier: Notifier;
+  private lastOperation: string = "idle";
   private agentRunner: AgentRunner;
   private running: boolean = false;
   private shuttingDown: boolean = false;
@@ -109,6 +110,8 @@ export class Dispatcher {
       console.error("❌ Failed to acquire dispatcher lock");
       throw new Error("Failed to acquire lock");
     }
+
+    this.setupOutputInterceptor();
 
     console.log("🌙 While Humans Sleep - Starting dispatcher");
     console.log(`   PID: ${process.pid}`);
@@ -301,6 +304,67 @@ export class Dispatcher {
   }
 
   /**
+   * Installs an interceptor on stdout/stderr to detect unexpected output.
+   *
+   * All WHS output goes through console.log/console.error which we control.
+   * Any output that doesn't originate from our code is suspicious and gets
+   * tagged with the last known operation for debugging.
+   *
+   * This is diagnostic tooling to track down the "no git remotes found"
+   * mystery message (and any future similar issues).
+   */
+  private setupOutputInterceptor(): void {
+    const self = this;
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+
+    // Track whether we're inside a console.log/error call
+    let insideConsole = false;
+    const origConsoleLog = console.log;
+    const origConsoleError = console.error;
+    const origConsoleWarn = console.warn;
+
+    console.log = (...args: unknown[]) => {
+      insideConsole = true;
+      origConsoleLog(...args);
+      insideConsole = false;
+    };
+    console.error = (...args: unknown[]) => {
+      insideConsole = true;
+      origConsoleError(...args);
+      insideConsole = false;
+    };
+    console.warn = (...args: unknown[]) => {
+      insideConsole = true;
+      origConsoleWarn(...args);
+      insideConsole = false;
+    };
+
+    function interceptWrite(
+      stream: "stdout" | "stderr",
+      origWrite: typeof process.stdout.write
+    ): typeof process.stdout.write {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wrapped = function (chunk: any, encodingOrCb?: any, cb?: any): boolean {
+        if (!insideConsole) {
+          const text = typeof chunk === "string" ? chunk : chunk.toString();
+          const trimmed = text.trim();
+          if (trimmed.length > 0) {
+            origConsoleWarn(
+              `[WHS:INTERCEPTED] ${stream}: "${trimmed}" (during: ${self.lastOperation})`
+            );
+          }
+        }
+        return origWrite.call(process[stream], chunk, encodingOrCb, cb);
+      };
+      return wrapped as typeof process.stdout.write;
+    }
+
+    process.stdout.write = interceptWrite("stdout", origStdoutWrite);
+    process.stderr.write = interceptWrite("stderr", origStderrWrite);
+  }
+
+  /**
    * Runs a minimal agent invocation to verify auth/connectivity.
    *
    * Called before the tick loop on start(), and after resume() before the
@@ -353,6 +417,7 @@ export class Dispatcher {
    * Checks beads daemon health for all projects and restarts if needed
    */
   private async checkDaemonHealth(): Promise<void> {
+    this.lastOperation = "checkDaemonHealth";
     let restartedCount = 0;
 
     for (const project of this.projects.values()) {
@@ -392,13 +457,16 @@ export class Dispatcher {
     }
 
     // 0. Reconcile activeWork with actually running agents (zombie detection)
+    this.lastOperation = "reconcileActiveWork";
     this.reconcileActiveWork();
 
     // 1. Check CI status for any pending steps
+    this.lastOperation = "checkPendingCI";
     await this.checkPendingCI();
 
     // 2. Poll orchestrator beads for ready workflow steps
     // Note: Steps blocked by question beads or ci:pending won't appear in ready list
+    this.lastOperation = "getReadyWorkflowSteps";
     const workflowSteps = this.getReadyWorkflowSteps();
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
@@ -437,6 +505,7 @@ export class Dispatcher {
     }
 
     // 4. If under capacity, poll project beads for new work
+    this.lastOperation = "pollProjectBacklogs";
     if (this.state.activeWork.size < this.config.concurrency.maxTotal) {
       const newWork = await this.pollProjectBacklogs();
       // Track per-project dispatch counts within this tick
@@ -715,6 +784,7 @@ export class Dispatcher {
    * Starts a new workflow for a source bead
    */
   private async startNewWorkflow(item: WorkItem): Promise<void> {
+    this.lastOperation = `startNewWorkflow:${item.project}/${item.id}`;
     console.log(`📋 Starting workflow: ${item.project}/${item.id} - ${item.title}`);
 
     const project = this.projects.get(item.project);
@@ -756,6 +826,7 @@ export class Dispatcher {
    * Dispatches a workflow step (continuing an existing workflow)
    */
   private async dispatchWorkflowStep(step: WorkItem): Promise<void> {
+    this.lastOperation = `dispatchWorkflowStep:${step.id}`;
     // Get the parent epic first, then extract source info from it
     const epic = getWorkflowEpic(step.id);
     if (!epic) {
@@ -827,6 +898,7 @@ export class Dispatcher {
    * Runs an agent for a workflow step
    */
   private async runAgentStep(work: ActiveWork): Promise<void> {
+    this.lastOperation = `runAgentStep:${work.agent}:${work.workItem.project}/${work.workItem.id}`;
     const project = this.projects.get(work.workItem.project);
     if (!project) {
       throw new Error(`Project not found: ${work.workItem.project}`);
@@ -919,6 +991,7 @@ export class Dispatcher {
     sessionId: string,
     answer: string
   ): Promise<void> {
+    this.lastOperation = `resumeAgentStep:${work.agent}:${work.workItem.project}/${work.workItem.id}`;
     await this.notifier.notifyProgress(work, `Resuming ${work.agent} agent with answer`);
 
     try {
@@ -1037,6 +1110,7 @@ export class Dispatcher {
     handoff: { next_agent: string; pr_number?: number; ci_status?: string; context: string },
     _stepCost: number
   ): Promise<void> {
+    this.lastOperation = `processHandoff:${work.agent}->${handoff.next_agent}:${work.workItem.project}/${work.workItem.id}`;
     console.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
 
     // Complete the current step
