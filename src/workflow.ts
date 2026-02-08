@@ -592,6 +592,40 @@ export function clearStepResumeInfo(stepId: string): void {
 }
 
 /**
+ * Finds an orchestrator epic by source bead ID (without needing project name)
+ *
+ * Useful when the user passes a source bead ID (e.g., bai-zv0.1) instead
+ * of an orchestrator epic ID (e.g., orc-abc).
+ */
+export function findEpicBySourceBead(sourceBeadId: string): WorkflowEpic | null {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const epics = beads.list(orchestratorPath, {
+      type: "epic",
+      labelAll: [`source:${sourceBeadId}`],
+    });
+
+    if (epics.length === 0) {
+      return null;
+    }
+
+    const bead = epics[0];
+    const { project, sourceId } = parseEpicLabels(bead.labels || []);
+    return {
+      id: bead.id,
+      sourceProject: project,
+      sourceBeadId: sourceId,
+      title: bead.title,
+      status: bead.status as "open" | "in_progress" | "blocked" | "closed",
+      createdAt: new Date(bead.created_at || Date.now()),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Errored workflow info returned by getErroredWorkflows
  */
 export interface ErroredWorkflow {

@@ -1308,15 +1308,23 @@ program
     const {
       getErroredWorkflows,
       retryWorkflow,
-      getOrchestratorPath,
+      findEpicBySourceBead,
     } = await import("./workflow.js");
 
     if (epicId) {
-      // Retry a specific workflow
-      console.log(`🔄 Retrying workflow: ${epicId}`);
+      // Try direct epic ID first; if it fails, resolve as a source bead ID
+      let resolvedEpicId = epicId;
+      const epic = findEpicBySourceBead(epicId);
+      if (epic) {
+        resolvedEpicId = epic.id;
+        console.log(`🔄 Retrying workflow: ${resolvedEpicId} (source: ${epic.sourceProject}/${epicId})`);
+      } else {
+        console.log(`🔄 Retrying workflow: ${epicId}`);
+      }
+
       try {
-        retryWorkflow(epicId);
-        console.log(`✅ Workflow ${epicId} reset for retry.`);
+        retryWorkflow(resolvedEpicId);
+        console.log(`✅ Workflow ${resolvedEpicId} reset for retry.`);
         console.log(`   Run 'whs start' to dispatch, or it will pick up on the next tick.`);
       } catch (err) {
         console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
