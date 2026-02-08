@@ -86,6 +86,10 @@ vi.mock("./workflow.js", () => ({
   // CI checking functions
   getStepsPendingCI: vi.fn(() => []),
   updateStepCIStatus: vi.fn(),
+  // Error recovery functions
+  errorWorkflow: vi.fn(),
+  getErroredWorkflows: vi.fn(() => []),
+  retryWorkflow: vi.fn(),
 }));
 
 vi.mock("./worktree.js", () => ({
@@ -1488,5 +1492,228 @@ describe("Preflight check", () => {
 
     expect((dispatcher as any).preflightNeeded).toBe(true);
     expect(mockState.setPaused).toHaveBeenCalledWith(expect.any(Object), false);
+  });
+});
+
+// ============================================================
+// Errored Workflow Recovery Tests
+// ============================================================
+
+describe("Errored workflow recovery", () => {
+  let mockWorkflow: any;
+  let mockState: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [
+      {
+        name: "test-project",
+        repoPath: "/home/user/work/test-project",
+        baseBranch: "main",
+        agentsPath: "docs/llm/agents",
+        beadsMode: "committed",
+      },
+    ],
+    orchestratorPath: "/home/user/work/whs-orchestrator",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const beadsModule = await import("./beads/index.js");
+    (beadsModule.beads as any).ready.mockReturnValue([]);
+    (beadsModule.beads as any).listPendingQuestions.mockReturnValue([]);
+    mockWorkflow = await import("./workflow.js");
+    mockState = await import("./state.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("handleAuthError marks workflow as errored, not blocked", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    const mockBeads = (await import("./beads/index.js")).beads as any;
+    mockBeads.ready.mockReturnValue([{
+      id: "bd-123",
+      title: "Test task",
+      description: "Test",
+      priority: 1,
+      type: "task",
+      status: "open",
+      labels: [],
+      dependencies: [],
+    }]);
+
+    mockWorkflow.startWorkflow.mockResolvedValue({
+      epicId: "bd-w001",
+      stepId: "bd-w001.1",
+    });
+
+    // Agent returns auth error
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "session-123",
+      output: "",
+      costUsd: 0,
+      turns: 0,
+      success: false,
+      isAuthError: true,
+      error: "OAuth token expired",
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    await (dispatcher as any).tick();
+    await flushPromises();
+
+    // Should call errorWorkflow (not completeWorkflow with "blocked")
+    expect(mockWorkflow.errorWorkflow).toHaveBeenCalledWith(
+      "bd-w001",
+      expect.stringContaining("Authentication error"),
+      "auth"
+    );
+
+    // Should NOT call completeWorkflow with "blocked"
+    expect(mockWorkflow.completeWorkflow).not.toHaveBeenCalledWith(
+      "bd-w001",
+      "blocked",
+      expect.any(String)
+    );
+
+    // Should notify error
+    expect(mockNotifier.notifyError).toHaveBeenCalled();
+  });
+
+  it("recoverErroredWorkflows resets errored workflows", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getErroredWorkflows.mockReturnValue([
+      {
+        epicId: "bd-w001",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test-project",
+        sourceBeadId: "bd-123",
+      },
+      {
+        epicId: "bd-w002",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test-project",
+        sourceBeadId: "bd-456",
+      },
+    ]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).recoverErroredWorkflows();
+
+    expect(mockWorkflow.retryWorkflow).toHaveBeenCalledTimes(2);
+    expect(mockWorkflow.retryWorkflow).toHaveBeenCalledWith("bd-w001");
+    expect(mockWorkflow.retryWorkflow).toHaveBeenCalledWith("bd-w002");
+  });
+
+  it("recoverErroredWorkflows is called after preflight on start", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockState.getLockInfo.mockReturnValue(null);
+    mockState.acquireLock.mockReturnValue(true);
+
+    // Preflight succeeds
+    mockAgentRunnerInstance.run.mockResolvedValue({
+      sessionId: "preflight",
+      output: "PREFLIGHT_OK",
+      costUsd: 0.001,
+      turns: 1,
+      success: true,
+    });
+
+    // One errored workflow to recover
+    mockWorkflow.getErroredWorkflows.mockReturnValue([
+      {
+        epicId: "bd-w001",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test-project",
+        sourceBeadId: "bd-123",
+      },
+    ]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    // Spy on recoverErroredWorkflows and stop the loop immediately
+    const recoverSpy = vi.spyOn(dispatcher as any, "recoverErroredWorkflows");
+    const originalSleep = (dispatcher as any).sleep.bind(dispatcher);
+    (dispatcher as any).sleep = async () => {
+      // Stop the loop on first sleep (after preflight + recovery, before first tick)
+      (dispatcher as any).running = false;
+    };
+
+    await dispatcher.start();
+
+    // recoverErroredWorkflows should have been called after preflight
+    expect(recoverSpy).toHaveBeenCalled();
+    expect(mockWorkflow.retryWorkflow).toHaveBeenCalledWith("bd-w001");
+  });
+
+  it("retryWorkflow resets epic and step status", async () => {
+    // This is tested in workflow.test.ts, but verify the integration:
+    // dispatcher's recoverErroredWorkflows calls retryWorkflow for each errored workflow
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getErroredWorkflows.mockReturnValue([
+      {
+        epicId: "bd-w001",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test-project",
+        sourceBeadId: "bd-123",
+      },
+    ]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).recoverErroredWorkflows();
+
+    expect(mockWorkflow.retryWorkflow).toHaveBeenCalledWith("bd-w001");
+  });
+
+  it("recoverErroredWorkflows handles retryWorkflow errors gracefully", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getErroredWorkflows.mockReturnValue([
+      {
+        epicId: "bd-w001",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test-project",
+        sourceBeadId: "bd-123",
+      },
+    ]);
+
+    mockWorkflow.retryWorkflow.mockImplementation(() => {
+      throw new Error("beads CLI failed");
+    });
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+
+    // Should not throw
+    expect(() => (dispatcher as any).recoverErroredWorkflows()).not.toThrow();
+  });
+
+  it("recoverErroredWorkflows does nothing when no errored workflows", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getErroredWorkflows.mockReturnValue([]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).recoverErroredWorkflows();
+
+    expect(mockWorkflow.retryWorkflow).not.toHaveBeenCalled();
   });
 });

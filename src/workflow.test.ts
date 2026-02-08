@@ -779,6 +779,166 @@ describe("workflow functions with mocked beads", () => {
       expect(path).toBe("/mock/orchestrator");
     });
   });
+
+  describe("errorWorkflow", () => {
+    it("sets errored label and adds comment", async () => {
+      const { errorWorkflow } = await import("./workflow.js");
+
+      errorWorkflow("bd-w001", "OAuth token expired", "auth");
+
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "blocked",
+          labelAdd: ["errored:auth"],
+        })
+      );
+      expect(mockBeads.comment).toHaveBeenCalledWith(
+        "bd-w001",
+        "Errored (auth): OAuth token expired",
+        "/mock/orchestrator"
+      );
+    });
+  });
+
+  describe("getErroredWorkflows", () => {
+    it("returns errored epics", async () => {
+      const { getErroredWorkflows } = await import("./workflow.js");
+
+      mockBeads.list.mockReturnValue([
+        {
+          id: "bd-w001",
+          title: "test:bd-123 - Test Task",
+          description: "Auth failed",
+          labels: ["project:test", "source:bd-123", "errored:auth"],
+          status: "blocked",
+        },
+      ]);
+
+      const errored = getErroredWorkflows();
+
+      expect(errored).toHaveLength(1);
+      expect(errored[0]).toEqual({
+        epicId: "bd-w001",
+        errorType: "auth",
+        reason: "Auth failed",
+        sourceProject: "test",
+        sourceBeadId: "bd-123",
+      });
+
+      expect(mockBeads.list).toHaveBeenCalledWith(
+        "/mock/orchestrator",
+        expect.objectContaining({
+          type: "epic",
+          status: "blocked",
+          labelAny: ["errored:auth"],
+        })
+      );
+    });
+
+    it("returns empty array when no errored workflows", async () => {
+      const { getErroredWorkflows } = await import("./workflow.js");
+
+      mockBeads.list.mockReturnValue([]);
+
+      const errored = getErroredWorkflows();
+
+      expect(errored).toEqual([]);
+    });
+
+    it("returns empty array on error", async () => {
+      const { getErroredWorkflows } = await import("./workflow.js");
+
+      mockBeads.list.mockImplementation(() => {
+        throw new Error("Failed");
+      });
+
+      const errored = getErroredWorkflows();
+
+      expect(errored).toEqual([]);
+    });
+  });
+
+  describe("retryWorkflow", () => {
+    it("resets epic status and removes labels", async () => {
+      const { retryWorkflow } = await import("./workflow.js");
+
+      // Mock finding in_progress steps under the epic
+      mockBeads.list.mockReturnValue([
+        {
+          id: "bd-w001.1",
+          title: "implementation",
+          labels: ["agent:implementation", "whs:step"],
+          status: "in_progress",
+          parent: "bd-w001",
+        },
+      ]);
+
+      retryWorkflow("bd-w001");
+
+      // Epic should be reset to open with labels removed
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "open",
+          labelRemove: ["blocked:human", "errored:auth"],
+        })
+      );
+
+      // Comment should be added
+      expect(mockBeads.comment).toHaveBeenCalledWith(
+        "bd-w001",
+        "Retrying workflow",
+        "/mock/orchestrator"
+      );
+
+      // Step should be reset to open
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.1",
+        "/mock/orchestrator",
+        { status: "open" }
+      );
+    });
+
+    it("handles no in_progress steps gracefully", async () => {
+      const { retryWorkflow } = await import("./workflow.js");
+
+      mockBeads.list.mockReturnValue([]);
+
+      retryWorkflow("bd-w001");
+
+      // Epic should still be reset
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "open",
+        })
+      );
+    });
+
+    it("handles step list error gracefully", async () => {
+      const { retryWorkflow } = await import("./workflow.js");
+
+      mockBeads.list.mockImplementation(() => {
+        throw new Error("Failed to list");
+      });
+
+      // Should not throw
+      expect(() => retryWorkflow("bd-w001")).not.toThrow();
+
+      // Epic should still be reset
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "open",
+        })
+      );
+    });
+  });
 });
 
 describe("workflow label parsing", () => {

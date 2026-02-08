@@ -48,6 +48,9 @@ import {
   clearStepResumeInfo,
   getStepsPendingCI,
   updateStepCIStatus,
+  errorWorkflow,
+  getErroredWorkflows,
+  retryWorkflow,
 } from "./workflow.js";
 import { execSync } from "child_process";
 import { ensureWorktree, removeWorktree } from "./worktree.js";
@@ -146,6 +149,10 @@ export class Dispatcher {
       throw err;
     }
 
+    // Recover any workflows that were marked errored (e.g., auth failures)
+    // Now that preflight passed, these can be retried
+    this.recoverErroredWorkflows();
+
     this.running = true;
 
     // Pause/resume signal handlers (used by `whs pause` and `whs resume`)
@@ -160,6 +167,7 @@ export class Dispatcher {
         this.preflightNeeded = false;
         try {
           await this.runPreflightCheck();
+          this.recoverErroredWorkflows();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.error(`❌ Preflight check failed after resume: ${message}`);
@@ -318,6 +326,27 @@ export class Dispatcher {
     }
 
     console.log("✅ Preflight check passed");
+  }
+
+  /**
+   * Recovers workflows that were marked as errored (e.g., auth failures)
+   *
+   * Called after preflight passes — if we can auth now, errored workflows
+   * should be retried automatically.
+   */
+  private recoverErroredWorkflows(): void {
+    const errored = getErroredWorkflows();
+    if (errored.length === 0) return;
+
+    console.log(`🔄 Recovering ${errored.length} errored workflow(s)...`);
+    for (const workflow of errored) {
+      try {
+        retryWorkflow(workflow.epicId);
+        console.log(`   ✓ ${workflow.epicId} (${workflow.sourceProject}/${workflow.sourceBeadId}) — ${workflow.errorType}`);
+      } catch (err) {
+        console.error(`   ✗ Failed to recover ${workflow.epicId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   /**
@@ -1092,7 +1121,8 @@ export class Dispatcher {
    * Handles an authentication error - stops the dispatcher entirely
    *
    * Auth errors require human intervention (re-login, API key refresh)
-   * so we stop all work and notify loudly.
+   * so we stop all work and notify loudly. Uses errored:auth label
+   * (not blocked:human) so the workflow auto-recovers on restart.
    */
   private async handleAuthError(work: ActiveWork, message: string): Promise<void> {
     console.error("\n" + "=".repeat(60));
@@ -1108,8 +1138,8 @@ export class Dispatcher {
     // Notify about the auth error
     await this.notifier.notifyError(work, new Error(`Authentication failed: ${message}`));
 
-    // Mark current work as blocked
-    await this.markWorkflowBlocked(work, `Authentication error: ${message}`);
+    // Mark workflow as errored (not blocked) — will auto-recover on restart
+    errorWorkflow(work.workflowEpicId, `Authentication error: ${message}`, "auth");
     this.state = removeActiveWork(this.state, work.workItem.id);
 
     // Stop the dispatcher entirely - auth errors affect all agents

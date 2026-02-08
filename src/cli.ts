@@ -653,6 +653,7 @@ program
   .description("Start planning a new feature (interactive)")
   .option("-P, --project <name>", "Project name (default: infer from cwd)")
   .option("-p, --priority <level>", "Priority level (0-4, where 0 is critical)")
+  .option("--parallel", "Allow this epic to run in parallel with existing epics")
   .action(async (inputDescription, options) => {
     const { createInterface } = await import("readline");
     const rl = createInterface({
@@ -766,6 +767,21 @@ program
       console.log(`  Title: ${epic.title}`);
       console.log(`  Status: ${epic.status}`);
 
+      // Chain behind existing epics (unless --parallel)
+      if (!options.parallel) {
+        const existingEpics = beads.list(projectPath, {
+          type: "epic",
+          labelAll: ["whs"],
+        }).filter((b) => b.id !== epic.id && b.status !== "closed" && b.status !== "tombstone");
+
+        if (existingEpics.length > 0) {
+          // Block on the most recently created epic
+          const lastEpic = existingEpics[existingEpics.length - 1];
+          beads.depAdd(epic.id, lastEpic.id, projectPath);
+          console.log(`  Blocked by: ${lastEpic.id} (${lastEpic.title})`);
+        }
+      }
+
       // Create planning task (open status)
       // Use label to track epic association instead of parent (to avoid dependency cycle)
       const planningTask = beads.create(`Plan: ${description}`, projectPath, {
@@ -804,6 +820,7 @@ program
   .description("Import stories from a planning document")
   .option("-P, --project <name>", "Project name (inferred from cwd if omitted)")
   .option("--dry-run", "Show what would be created without creating anything")
+  .option("--parallel", "Allow imported epics to run in parallel with each other and existing epics")
   .action(async (file, options) => {
     const { readFileSync } = await import("fs");
     const { parseAndValidatePlan } = await import("./plan-parser.js");
@@ -885,6 +902,19 @@ program
     const projectPath = expandPath(project.repoPath);
     const createdBeads: Map<string, string> = new Map(); // title -> beadId
 
+    // Find the last existing open epic to chain behind (unless --parallel)
+    let previousEpicId: string | undefined;
+    if (!options.parallel) {
+      const existingEpics = beads.list(projectPath, {
+        type: "epic",
+        labelAll: ["whs"],
+      }).filter((b) => b.status !== "closed" && b.status !== "tombstone");
+
+      if (existingEpics.length > 0) {
+        previousEpicId = existingEpics[existingEpics.length - 1].id;
+      }
+    }
+
     for (const epic of plan.epics) {
       // Create epic
       const epicBead = beads.create(epic.title, projectPath, {
@@ -894,6 +924,13 @@ program
         labels: ["whs"],
       });
       console.log(`✓ Created epic: ${epicBead.id} - ${epic.title}`);
+
+      // Chain behind previous epic (unless --parallel)
+      if (!options.parallel && previousEpicId) {
+        beads.depAdd(epicBead.id, previousEpicId, projectPath);
+        console.log(`  → Blocked by: ${previousEpicId}`);
+      }
+      previousEpicId = epicBead.id;
 
       // Create stories
       for (const story of epic.stories) {
@@ -1258,6 +1295,55 @@ program
     }
     process.kill(lockInfo.pid, "SIGUSR2");
     console.log("Dispatcher resumed.");
+  });
+
+program
+  .command("retry [epic-id]")
+  .description("Retry errored/blocked workflows (auto-recovers errored, or retry a specific epic)")
+  .action(async (epicId: string | undefined) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const {
+      getErroredWorkflows,
+      retryWorkflow,
+      getOrchestratorPath,
+    } = await import("./workflow.js");
+
+    if (epicId) {
+      // Retry a specific workflow
+      console.log(`🔄 Retrying workflow: ${epicId}`);
+      try {
+        retryWorkflow(epicId);
+        console.log(`✅ Workflow ${epicId} reset for retry.`);
+        console.log(`   Run 'whs start' to dispatch, or it will pick up on the next tick.`);
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Auto mode: retry all errored workflows
+    const errored = getErroredWorkflows();
+
+    if (errored.length === 0) {
+      console.log("No errored workflows to retry.");
+      return;
+    }
+
+    console.log(`🔄 Retrying ${errored.length} errored workflow(s):\n`);
+    for (const workflow of errored) {
+      try {
+        retryWorkflow(workflow.epicId);
+        console.log(`  ✓ ${workflow.epicId} (${workflow.sourceProject}/${workflow.sourceBeadId}) — ${workflow.errorType}`);
+      } catch (err) {
+        console.error(`  ✗ ${workflow.epicId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    console.log(`\nRun 'whs start' to dispatch, or it will pick up on the next tick.`);
   });
 
 program

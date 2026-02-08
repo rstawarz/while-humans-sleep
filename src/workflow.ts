@@ -592,6 +592,108 @@ export function clearStepResumeInfo(stepId: string): void {
 }
 
 /**
+ * Errored workflow info returned by getErroredWorkflows
+ */
+export interface ErroredWorkflow {
+  epicId: string;
+  errorType: string;
+  reason: string;
+  sourceProject: string;
+  sourceBeadId: string;
+}
+
+/**
+ * Marks a workflow as errored (distinguishable from legitimately blocked)
+ *
+ * Sets the epic to "blocked" status (beads has no "errored" status) and adds
+ * an `errored:{errorType}` label. Does NOT touch the step — the step stays
+ * in_progress, which keeps it out of the ready list (steps use `parent` not
+ * `dep`, so beads.ready() doesn't check parent epic status).
+ */
+export function errorWorkflow(
+  epicId: string,
+  reason: string,
+  errorType: string
+): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  beads.update(epicId, orchestratorPath, {
+    status: "blocked",
+    labelAdd: [`errored:${errorType}`],
+  });
+  beads.comment(epicId, `Errored (${errorType}): ${reason}`, orchestratorPath);
+}
+
+/**
+ * Gets workflows that are in an errored state
+ *
+ * Returns epics with `errored:*` labels. These are workflows that failed
+ * due to transient errors (auth, network) rather than being legitimately blocked.
+ */
+export function getErroredWorkflows(): ErroredWorkflow[] {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const epics = beads.list(orchestratorPath, {
+      type: "epic",
+      status: "blocked",
+      labelAny: ["errored:auth"],
+    });
+
+    return epics.map((bead) => {
+      const errorLabel = bead.labels?.find((l) => l.startsWith("errored:"));
+      const errorType = errorLabel?.replace("errored:", "") || "unknown";
+      const { project, sourceId } = parseEpicLabels(bead.labels || []);
+
+      return {
+        epicId: bead.id,
+        errorType,
+        reason: bead.description || "",
+        sourceProject: project,
+        sourceBeadId: sourceId,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Retries an errored or blocked workflow
+ *
+ * Resets the epic from "blocked" to "open", removes errored/blocked labels,
+ * and resets any in_progress steps under the epic back to "open" so they
+ * become visible to getReadyWorkflowSteps.
+ */
+export function retryWorkflow(epicId: string): void {
+  const orchestratorPath = getOrchestratorPath();
+
+  // Remove errored and blocked labels, reset status to open
+  beads.update(epicId, orchestratorPath, {
+    status: "open",
+    labelRemove: ["blocked:human", "errored:auth"],
+  });
+  beads.comment(epicId, "Retrying workflow", orchestratorPath);
+
+  // Find in_progress steps under the epic and reset to open
+  try {
+    const steps = beads.list(orchestratorPath, {
+      type: "task",
+      status: "in_progress",
+      parent: epicId,
+    });
+
+    for (const step of steps) {
+      beads.update(step.id, orchestratorPath, {
+        status: "open",
+      });
+    }
+  } catch {
+    // Best effort — steps may not exist
+  }
+}
+
+/**
  * Extracts the agent name from a bead's labels or title
  */
 function extractAgentFromBead(bead: Bead): string {
