@@ -316,7 +316,11 @@ export class BeadsClient {
     // Configure sync-branch if not already set
     const currentSyncBranch = this.configGet("sync.branch", cwd);
     if (currentSyncBranch !== syncBranch) {
-      this.configSet("sync.branch", syncBranch, cwd);
+      try {
+        this.configSet("sync.branch", syncBranch, cwd);
+      } catch {
+        // config.yaml may not exist yet — not fatal, daemon can still run
+      }
     }
 
     // Start daemon if not running
