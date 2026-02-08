@@ -468,10 +468,19 @@ export class Dispatcher {
     // Note: Steps blocked by question beads or ci:pending won't appear in ready list
     this.lastOperation = "getReadyWorkflowSteps";
     const workflowSteps = this.getReadyWorkflowSteps();
+    // Track per-project dispatch counts within this loop
+    // (activeWork isn't updated until async dispatch runs)
+    const stepDispatchedPerProject = new Map<string, number>();
     for (const step of workflowSteps) {
       if (this.isAtCapacity()) break;
       if (this.state.activeWork.has(step.id)) continue;
       if (this.runningAgents.has(step.id)) continue;
+
+      // Check per-project capacity (active + dispatched this tick)
+      const activeForProject = [...this.state.activeWork.values()].filter(
+        (w) => w.workItem.project === step.project
+      ).length + (stepDispatchedPerProject.get(step.project) || 0);
+      if (activeForProject >= this.config.concurrency.maxPerProject) continue;
 
       // Mark step in_progress synchronously BEFORE async dispatch
       // This prevents the next tick from picking it up again
@@ -502,6 +511,7 @@ export class Dispatcher {
           this.runningAgents.delete(step.id);
         });
       this.runningAgents.set(step.id, agentPromise);
+      stepDispatchedPerProject.set(step.project, (stepDispatchedPerProject.get(step.project) || 0) + 1);
     }
 
     // 4. If under capacity, poll project beads for new work
@@ -510,8 +520,11 @@ export class Dispatcher {
       const newWork = await this.pollProjectBacklogs();
       // Track per-project dispatch counts within this tick
       // (activeWork isn't updated until async startNewWorkflow runs)
-      const dispatchedPerProject = new Map<string, number>();
-      let dispatchedTotal = 0;
+      // Seed with workflow steps dispatched in section 2 above
+      const dispatchedPerProject = new Map(stepDispatchedPerProject);
+      let dispatchedTotal = dispatchedPerProject.size > 0
+        ? [...dispatchedPerProject.values()].reduce((a, b) => a + b, 0)
+        : 0;
 
       for (const next of newWork) {
         // Check total capacity (activeWork + dispatched this tick)
@@ -707,17 +720,26 @@ export class Dispatcher {
   private getReadyWorkflowSteps(): WorkItem[] {
     try {
       const steps = getReadySteps();
-      return steps.map((step) => ({
-        id: step.id,
-        project: "", // Will be filled from epic
-        title: step.agent,
-        description: step.context,
-        priority: 2,
-        type: "task" as const,
-        status: step.status,
-        labels: [],
-        dependencies: [],
-      }));
+      return steps.flatMap((step) => {
+        // Resolve project name from the epic's source labels
+        const epicId = step.epicId;
+        const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
+        if (!sourceInfo) {
+          console.warn(`Cannot resolve project for step ${step.id} (epic: ${epicId})`);
+          return [];
+        }
+        return [{
+          id: step.id,
+          project: sourceInfo.project,
+          title: step.agent,
+          description: step.context,
+          priority: 2,
+          type: "task" as const,
+          status: step.status,
+          labels: [],
+          dependencies: [],
+        }];
+      });
     } catch (err) {
       // Orchestrator may not exist yet
       return [];

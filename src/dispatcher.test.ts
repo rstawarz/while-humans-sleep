@@ -633,6 +633,60 @@ describe("Dispatcher E2E", () => {
       // Should not start new workflow for same project
       expect(mockWorkflow.startWorkflow).not.toHaveBeenCalled();
     });
+
+    it("respects maxPerProject for workflow steps", async () => {
+      const { Dispatcher } = await import("./dispatcher.js");
+
+      // Config with per-project limit of 1
+      const limitedConfig: Config = {
+        ...testConfig,
+        concurrency: { maxTotal: 4, maxPerProject: 1 },
+      };
+
+      // Orchestrator has two ready workflow steps for the same project
+      mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+        {
+          id: "bd-w001.2",
+          epicId: "bd-w001",
+          agent: "quality_review",
+          context: "PR ready for review",
+          status: "open",
+        },
+        {
+          id: "bd-w002.1",
+          epicId: "bd-w002",
+          agent: "implementation",
+          context: "New task",
+          status: "open",
+        },
+      ]);
+
+      // Both epics belong to the same project
+      mockWorkflow.getSourceBeadInfo
+        .mockReturnValueOnce({ project: "test-project", beadId: "bd-100" })
+        .mockReturnValueOnce({ project: "test-project", beadId: "bd-200" });
+
+      // No project beads ready (we're testing workflow step dispatch only)
+      mockBeads.ready.mockReturnValue([]);
+
+      mockAgentRunnerInstance.run.mockReturnValue(new Promise(() => {}));
+
+      // Mock what dispatchWorkflowStep needs
+      mockWorkflow.getWorkflowEpic.mockReturnValue({
+        id: "bd-w001",
+        labels: ["project:test-project", "source:bd-100"],
+      });
+      mockWorkflow.getWorkflowContext.mockReturnValue("context");
+
+      const dispatcher = new Dispatcher(limitedConfig, mockNotifier);
+      (dispatcher as any).running = true;
+      await (dispatcher as any).tick();
+      await flushPromises();
+
+      // Should dispatch only the first step, skip the second due to maxPerProject
+      expect(mockWorkflow.markStepInProgress).toHaveBeenCalledTimes(1);
+      expect(mockWorkflow.markStepInProgress).toHaveBeenCalledWith("bd-w001.2");
+    });
   });
 
   describe("Dispatcher lifecycle", () => {
