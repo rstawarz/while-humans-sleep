@@ -132,6 +132,15 @@ export class CLIAgentRunner implements AgentRunner {
     const durationMs = Date.now() - startTime;
     const isAuthError = isAuthenticationError(output) || (error ? isAuthenticationError(error) : false);
 
+    // When auth error is detected from output but error message is generic,
+    // extract the auth-related line for a more useful error message
+    if (isAuthError && error && !isAuthenticationError(error)) {
+      const authLine = output.split("\n").find((line) => isAuthenticationError(line));
+      if (authLine) {
+        error = authLine.trim();
+      }
+    }
+
     return {
       sessionId,
       output: output.trim(),
