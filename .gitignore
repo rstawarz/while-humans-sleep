@@ -31,3 +31,5 @@ test/integration/fixtures/*
 
 # Local state
 .nec-local/
+
+.claude/settings.local.json
