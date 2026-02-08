@@ -341,8 +341,21 @@ export class Dispatcher {
     // 4. If under capacity, poll project beads for new work
     if (this.state.activeWork.size < this.config.concurrency.maxTotal) {
       const newWork = await this.pollProjectBacklogs();
-      const next = this.pickHighestPriority(newWork);
-      if (next) {
+      // Track per-project dispatch counts within this tick
+      // (activeWork isn't updated until async startNewWorkflow runs)
+      const dispatchedPerProject = new Map<string, number>();
+      let dispatchedTotal = 0;
+
+      for (const next of newWork) {
+        // Check total capacity (activeWork + dispatched this tick)
+        if (this.state.activeWork.size + dispatchedTotal >= this.config.concurrency.maxTotal) break;
+
+        // Check per-project capacity (active + dispatched this tick)
+        const activeForProject = [...this.state.activeWork.values()].filter(
+          (w) => w.workItem.project === next.project
+        ).length + (dispatchedPerProject.get(next.project) || 0);
+        if (activeForProject >= this.config.concurrency.maxPerProject) continue;
+
         const workflowPromise = this.startNewWorkflow(next)
           .catch((err) => {
             console.error(`Failed to start workflow for ${next.id}:`, err);
@@ -351,6 +364,9 @@ export class Dispatcher {
             this.runningAgents.delete(next.id);
           });
         this.runningAgents.set(next.id, workflowPromise);
+
+        dispatchedTotal++;
+        dispatchedPerProject.set(next.project, (dispatchedPerProject.get(next.project) || 0) + 1);
       }
     }
   }
@@ -575,6 +591,8 @@ export class Dispatcher {
       }
     }
 
+    // Sort by priority (lower number = higher priority)
+    items.sort((a, b) => a.priority - b.priority);
     return items;
   }
 
@@ -593,15 +611,6 @@ export class Dispatcher {
       labels: bead.labels || [],
       dependencies: bead.dependencies || [],
     };
-  }
-
-  /**
-   * Picks the highest priority work item
-   */
-  private pickHighestPriority(items: WorkItem[]): WorkItem | undefined {
-    if (items.length === 0) return undefined;
-    // Beads returns items sorted by priority, take first
-    return items[0];
   }
 
   /**

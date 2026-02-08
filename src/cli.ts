@@ -519,8 +519,6 @@ program
         agentsPath = agentsPath || defaultAgentsPath;
       }
 
-      rl.close();
-
       // Summary
       console.log(`\n📋 Project configuration:`);
       console.log(`   Name: ${name}`);
