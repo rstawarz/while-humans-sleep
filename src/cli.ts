@@ -562,7 +562,7 @@ program
 
       // Worktree hooks setup
       if (!options.yes) {
-        const { hasWtConfig, analyzeProjectForHooks, formatHooksAsToml, writeWtConfig } =
+        const { hasWtConfig, analyzeProjectForHooks, formatHooksAsToml, writeWtConfig, gatherSiblingHooks } =
           await import("./worktree-hooks.js");
 
         if (!hasWtConfig(resolvedPath)) {
@@ -579,7 +579,10 @@ program
               console.log("\n  Analyzing project...");
               const { createAgentRunner } = await import("./agent-runner-factory.js");
               const runner = createAgentRunner(loadConfig().runnerType);
-              const hooks = await analyzeProjectForHooks(resolvedPath, runner);
+              // Gather sibling project hooks as reference
+              const config = loadConfig();
+              const siblingHooks = gatherSiblingHooks(config.projects, resolvedPath);
+              const hooks = await analyzeProjectForHooks(resolvedPath, runner, siblingHooks);
               const toml = formatHooksAsToml(hooks);
 
               console.log("\n  Suggested .config/wt.toml:\n");
@@ -1344,6 +1347,7 @@ setupCmd
       analyzeProjectForHooks,
       formatHooksAsToml,
       writeWtConfig,
+      gatherSiblingHooks,
     } = await import("./worktree-hooks.js");
 
     // Check existing config
@@ -1371,7 +1375,8 @@ setupCmd
       console.log("  Running analysis...\n");
       const { createAgentRunner } = await import("./agent-runner-factory.js");
       const runner = createAgentRunner(config.runnerType);
-      const hooks = await analyzeProjectForHooks(projectPath, runner);
+      const siblingHooks = gatherSiblingHooks(config.projects, projectPath);
+      const hooks = await analyzeProjectForHooks(projectPath, runner, siblingHooks);
       const toml = formatHooksAsToml(hooks);
 
       console.log("  Suggested .config/wt.toml:\n");

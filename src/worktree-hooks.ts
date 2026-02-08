@@ -9,7 +9,8 @@
 
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
 import { execSync } from "child_process";
-import { join, resolve, basename } from "path";
+import { join, resolve, basename, dirname } from "path";
+import { parse as parseYaml } from "yaml";
 import type { AgentRunner } from "./agent-runner-interface.js";
 
 /**
@@ -19,6 +20,14 @@ export interface HookSuggestion {
   postCreate: Record<string, string>;
   postRemove: Record<string, string>;
   listUrl?: string;
+}
+
+/**
+ * A sibling project's existing wt.toml, used as reference for the analysis agent
+ */
+export interface SiblingHook {
+  projectName: string;
+  tomlContent: string;
 }
 
 /**
@@ -48,6 +57,12 @@ export interface ProjectInfo {
   packageJsonContent?: string;
   envExampleContent?: string;
   dockerComposeContent?: string;
+  /** All docker-compose files found (relative paths) */
+  dockerComposePaths: string[];
+  /** Content of shared infrastructure compose file (defines external networks) */
+  sharedServicesContent?: string;
+  /** Path to the shared infrastructure compose file */
+  sharedServicesPath?: string;
 }
 
 /**
@@ -65,6 +80,131 @@ interface WorkspaceDetail {
 const WT_CONFIG_DIR = ".config";
 const WT_CONFIG_FILE = "wt.toml";
 const WT_CONFIG_PATH = `${WT_CONFIG_DIR}/${WT_CONFIG_FILE}`;
+
+/**
+ * Common locations to check for docker-compose files within a project
+ */
+const COMPOSE_LOCATIONS = [
+  "docker-compose.yml",
+  "docker-compose.yaml",
+  "docker/docker-compose.yml",
+  "docker/docker-compose.yaml",
+];
+
+/**
+ * Extract external network names from a docker-compose file.
+ * These are networks the project depends on but doesn't define.
+ */
+function extractExternalNetworks(composeContent: string): string[] {
+  try {
+    const doc = parseYaml(composeContent);
+    if (!doc?.networks) return [];
+
+    const networks: string[] = [];
+    for (const [name, config] of Object.entries(doc.networks)) {
+      const cfg = config as Record<string, unknown> | null;
+      if (cfg?.external === true) {
+        // Use explicit name if set, otherwise use the key
+        const networkName = typeof cfg.name === "string" ? cfg.name : name;
+        networks.push(networkName);
+      }
+    }
+    return networks;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check if a docker-compose file defines (creates) a network with the given name.
+ * A network is "defined" if it appears in the networks section without external: true.
+ */
+function definesNetwork(composeContent: string, networkName: string): boolean {
+  try {
+    const doc = parseYaml(composeContent);
+    if (!doc?.networks) return false;
+
+    for (const [key, config] of Object.entries(doc.networks)) {
+      const cfg = config as Record<string, unknown> | null;
+      // Skip external references — we want definitions
+      if (cfg?.external === true) continue;
+
+      // Match by key name or explicit name property
+      if (key === networkName) return true;
+      if (cfg && typeof cfg.name === "string" && cfg.name === networkName) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search sibling directories for a docker-compose file that defines
+ * the external networks referenced by this project's compose files.
+ */
+function findSharedServicesCompose(
+  projectPath: string,
+  composeContents: string[]
+): { content: string; path: string } | undefined {
+  // Collect all external network names from the project's compose files
+  const externalNetworks: string[] = [];
+  for (const content of composeContents) {
+    externalNetworks.push(...extractExternalNetworks(content));
+  }
+  if (externalNetworks.length === 0) return undefined;
+
+  // Scan sibling directories under the same parent (e.g., ~/work/*)
+  const workDir = dirname(projectPath);
+  let entries: string[];
+  try {
+    entries = readdirSync(workDir);
+  } catch {
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    const siblingPath = join(workDir, entry);
+    if (siblingPath === projectPath) continue;
+
+    // Check standard compose locations
+    const candidatePaths = [...COMPOSE_LOCATIONS];
+
+    // Also check one level deeper for infrastructure-style layouts
+    // (e.g., templates/shared-services/, infrastructure/db/)
+    for (const subdir of ["templates", "infrastructure", "infra", "shared"]) {
+      const subdirPath = join(siblingPath, subdir);
+      try {
+        if (existsSync(subdirPath)) {
+          for (const sub of readdirSync(subdirPath)) {
+            candidatePaths.push(join(subdir, sub, "docker-compose.yml"));
+            candidatePaths.push(join(subdir, sub, "docker-compose.yaml"));
+          }
+        }
+      } catch {
+        /* ignore unreadable dirs */
+      }
+    }
+
+    for (const composeLoc of candidatePaths) {
+      const fullPath = join(siblingPath, composeLoc);
+      if (!existsSync(fullPath)) continue;
+
+      try {
+        const content = readFileSync(fullPath, "utf-8");
+        for (const network of externalNetworks) {
+          if (definesNetwork(content, network)) {
+            return { content, path: fullPath };
+          }
+        }
+      } catch {
+        /* ignore unreadable files */
+      }
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Checks if a project already has a worktrunk config
@@ -127,9 +267,21 @@ export function gatherProjectInfo(projectPath: string): ProjectInfo {
   const hasGemfile = existsSync(join(projectPath, "Gemfile"));
   const hasRequirementsTxt = existsSync(join(projectPath, "requirements.txt"));
   const hasPyprojectToml = existsSync(join(projectPath, "pyproject.toml"));
-  const hasDockerCompose =
-    existsSync(join(projectPath, "docker-compose.yml")) ||
-    existsSync(join(projectPath, "docker-compose.yaml"));
+  // Find all docker-compose files
+  const dockerComposePaths: string[] = [];
+  const dockerComposeContents: string[] = [];
+  for (const loc of COMPOSE_LOCATIONS) {
+    const fullPath = join(projectPath, loc);
+    if (existsSync(fullPath)) {
+      dockerComposePaths.push(loc);
+      try {
+        dockerComposeContents.push(readFileSync(fullPath, "utf-8"));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  const hasDockerCompose = dockerComposePaths.length > 0;
   const hasMakefile = existsSync(join(projectPath, "Makefile"));
   const hasRailsMigrations =
     existsSync(join(projectPath, "db", "schema.rb")) ||
@@ -209,18 +361,13 @@ export function gatherProjectInfo(projectPath: string): ProjectInfo {
     }
   }
 
-  // Read docker-compose content
-  let dockerComposeContent: string | undefined;
-  if (hasDockerCompose) {
-    const composePath = existsSync(join(projectPath, "docker-compose.yml"))
-      ? "docker-compose.yml"
-      : "docker-compose.yaml";
-    try {
-      dockerComposeContent = readFileSync(join(projectPath, composePath), "utf-8");
-    } catch {
-      // Ignore
-    }
-  }
+  // Use the first compose file content for backward compat
+  const dockerComposeContent = dockerComposeContents[0];
+
+  // Find shared infrastructure compose (e.g., shared Postgres/Redis container)
+  const sharedServices = findSharedServicesCompose(projectPath, dockerComposeContents);
+  const sharedServicesContent = sharedServices?.content;
+  const sharedServicesPath = sharedServices?.path;
 
   // Parse Makefile targets
   const makeTargets: string[] = [];
@@ -271,13 +418,16 @@ export function gatherProjectInfo(projectPath: string): ProjectInfo {
     packageJsonContent,
     envExampleContent,
     dockerComposeContent,
+    dockerComposePaths,
+    sharedServicesContent,
+    sharedServicesPath,
   };
 }
 
 /**
  * Builds the analysis prompt for Claude
  */
-function buildAnalysisPrompt(info: ProjectInfo): string {
+function buildAnalysisPrompt(info: ProjectInfo, siblingHooks?: SiblingHook[]): string {
   const sections: string[] = [];
 
   sections.push(`# Worktrunk Hook Analysis for "${info.name}"
@@ -327,8 +477,26 @@ Some projects are **monorepos** with multiple packages/services (npm workspaces,
 
 - Use \`{{ branch | sanitize_db }}\` for unique database names per worktree
 - Use \`createdb\`/\`dropdb\` for PostgreSQL
-- Copy \`.env\` from \`{{ primary_worktree_path }}\` and patch DATABASE_URL with sed
 - Clean up databases in \`[post-remove]\`
+- Only copy gitignored files (like \`.env\` with secrets) from \`{{ primary_worktree_path }}\`. Tracked files are already in the worktree.
+- **NEVER modify tracked files** (sed on committed files creates dirty worktrees). Use \`.local\` override files instead.
+
+### Node.js / Prisma projects
+- Set \`DATABASE_URL\` in \`.env\` — Prisma reads it directly
+- Copy \`.env\` from \`{{ primary_worktree_path }}\` and patch DATABASE_URL with sed (since \`.env\` is gitignored)
+
+### Rails projects
+- **\`DATABASE_URL\` does NOT override \`database.yml\`** when \`database:\` is set explicitly. Do not rely on \`DATABASE_URL\` for dev/test isolation.
+- Instead, use \`dotenv-rails\` gem + environment variables in \`database.yml\`:
+  - \`database.yml\`: \`database: <%= ENV.fetch("DATABASE_NAME", "myapp_development") %>\`
+  - Checked-in defaults: \`api/.env.development\` with \`DATABASE_NAME=myapp_development\`
+  - Worktree override: write \`api/.env.development.local\` with the branch-specific name
+- \`.local\` files take precedence in dotenv-rails load order and are conventionally gitignored
+- Example hook:
+  \`\`\`
+  echo 'DATABASE_NAME={{ branch | sanitize_db }}_development' > api/.env.development.local
+  echo 'DATABASE_NAME={{ branch | sanitize_db }}_test' > api/.env.test.local
+  \`\`\`
 `);
 
   // Project info section
@@ -369,11 +537,50 @@ Some projects are **monorepos** with multiple packages/services (npm workspaces,
   }
 
   if (info.hasDockerCompose) {
-    sections.push(`\n**docker-compose.yml:**\n\`\`\`yaml\n${info.dockerComposeContent}\n\`\`\``);
+    for (let i = 0; i < info.dockerComposePaths.length; i++) {
+      const path = info.dockerComposePaths[i];
+      // dockerComposeContents may not align 1:1 if reads failed, use dockerComposeContent for first
+      const content = i === 0 ? info.dockerComposeContent : undefined;
+      if (content) {
+        sections.push(`\n**${path}:**\n\`\`\`yaml\n${content}\n\`\`\``);
+      } else {
+        sections.push(`\n**${path}** (found)`);
+      }
+    }
+  }
+
+  if (info.sharedServicesContent) {
+    sections.push(`
+## Shared Infrastructure
+
+This project connects to an external Docker network. The following compose file provides shared services (database, cache, etc.) on that network:
+
+**${info.sharedServicesPath}:**
+\`\`\`yaml
+${info.sharedServicesContent}
+\`\`\`
+
+When generating database setup hooks:
+- Check if the database is reachable with \`pg_isready -h localhost -q\`
+- If not running, start it with: \`docker compose -f ${info.sharedServicesPath} up -d postgres\`
+- Wait for it to become ready with a retry loop and clear timeout error
+- Log status messages (e.g., "PostgreSQL is ready on localhost:5432")
+`);
   }
 
   if (info.hasMakefile && info.makeTargets.length > 0) {
     sections.push(`\n**Makefile targets:** ${info.makeTargets.join(", ")}`);
+  }
+
+  if (siblingHooks && siblingHooks.length > 0) {
+    sections.push(`
+## Reference: Existing Worktree Hooks
+
+Other projects in this workspace already have worktree hooks. Use these as reference for infrastructure patterns (database startup, env file handling, cleanup, etc.). Adapt the patterns to this project's stack — don't copy verbatim.
+`);
+    for (const sibling of siblingHooks) {
+      sections.push(`### ${sibling.projectName} (.config/wt.toml):\n\`\`\`toml\n${sibling.tomlContent}\n\`\`\``);
+    }
   }
 
   sections.push(`
@@ -499,15 +706,47 @@ export function writeWtConfig(projectPath: string, tomlContent: string): void {
 }
 
 /**
+ * Gather existing wt.toml files from sibling projects as reference.
+ * Accepts the projects array from config and the current project path to exclude.
+ */
+export function gatherSiblingHooks(
+  projects: Array<{ name: string; repoPath: string }>,
+  currentProjectPath: string
+): SiblingHook[] {
+  const resolvedCurrent = resolve(currentProjectPath);
+  const hooks: SiblingHook[] = [];
+
+  for (const project of projects) {
+    const projectPath = resolve(project.repoPath.replace(/^~/, process.env.HOME || "~"));
+    if (projectPath === resolvedCurrent) continue;
+
+    const wtTomlPath = join(projectPath, WT_CONFIG_DIR, WT_CONFIG_FILE);
+    if (existsSync(wtTomlPath)) {
+      try {
+        hooks.push({
+          projectName: project.name,
+          tomlContent: readFileSync(wtTomlPath, "utf-8"),
+        });
+      } catch {
+        /* ignore unreadable files */
+      }
+    }
+  }
+
+  return hooks;
+}
+
+/**
  * Analyzes a project and generates worktrunk hook suggestions using Claude
  */
 export async function analyzeProjectForHooks(
   projectPath: string,
-  runner: AgentRunner
+  runner: AgentRunner,
+  siblingHooks?: SiblingHook[]
 ): Promise<HookSuggestion> {
   const resolvedPath = resolve(projectPath);
   const projectInfo = gatherProjectInfo(resolvedPath);
-  const prompt = buildAnalysisPrompt(projectInfo);
+  const prompt = buildAnalysisPrompt(projectInfo, siblingHooks);
 
   const result = await runner.run({
     prompt,
