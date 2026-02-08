@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebFetch(domain:worktrunk.dev)",
-      "Bash(brew search:*)"
-    ]
-  }
-}
