@@ -5,6 +5,15 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-08
+
+### Added
+- **Errored workflow recovery**: Auth errors now use `errored:auth` label instead of `blocked:human`, distinguishing transient failures from legitimately stuck work
+  - Auto-recovery on startup: after preflight passes, errored workflows are automatically retried
+  - Auto-recovery on resume: same recovery runs after successful resume preflight
+  - `whs retry [epic-id]` CLI command: manual escape hatch for any blocked/errored workflow
+- **New workflow functions**: `errorWorkflow()`, `getErroredWorkflows()`, `retryWorkflow()` in workflow module
+
 ## [0.4.0] - 2026-02-08
 
 ### Added
