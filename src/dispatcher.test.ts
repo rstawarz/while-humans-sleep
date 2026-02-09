@@ -418,6 +418,10 @@ describe("Dispatcher E2E", () => {
     it("pauses workflow and notifies on pending question", async () => {
       const { Dispatcher } = await import("./dispatcher.js");
 
+      // Reset mocks that may leak from previous tests
+      mockWorkflow.getReadyWorkflowSteps.mockReturnValue([]);
+      mockWorkflow.getSourceBeadInfo.mockReturnValue(null);
+
       mockBeads.ready.mockReturnValue([testBead]);
       mockWorkflow.startWorkflow.mockResolvedValue({
         epicId: "bd-w001",
