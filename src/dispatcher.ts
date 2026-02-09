@@ -48,6 +48,8 @@ import {
   clearStepResumeInfo,
   getStepsPendingCI,
   updateStepCIStatus,
+  epicHasLabel,
+  addEpicLabel,
   errorWorkflow,
   getErroredWorkflows,
   retryWorkflow,
@@ -610,8 +612,27 @@ export class Dispatcher {
 
         if (ciStatus === "passed") {
           console.log(`✅ CI passed for PR #${step.prNumber}`);
+
+          // First CI pass for a quality_review step → redirect to implementation for PR feedback
+          if (
+            step.agent === "quality_review" &&
+            !epicHasLabel(step.epicId, "pr-feedback:addressed")
+          ) {
+            console.log(`   📝 Redirecting to implementation to address PR feedback`);
+            updateStepCIStatus(step.id, "passed", step.retryCount);
+            completeStep(step.id, "Redirected to implementation for PR feedback review");
+            createNextStep(
+              step.epicId,
+              "implementation",
+              `CI passed for PR #${step.prNumber}. Review and address any PR comments/feedback, then hand off to quality_review.\nCheck: gh pr view ${step.prNumber} --json comments,reviews`,
+              { pr_number: step.prNumber, ci_status: "passed" }
+            );
+            addEpicLabel(step.epicId, "pr-feedback:addressed");
+            continue;
+          }
+
+          // Normal path: unblock the step
           updateStepCIStatus(step.id, "passed", step.retryCount);
-          // Step will now be picked up as ready (ci:passed, no ci:pending)
           continue;
         }
 

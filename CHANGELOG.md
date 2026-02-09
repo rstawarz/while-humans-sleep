@@ -5,6 +5,15 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-09
+
+### Added
+- **PR feedback routing**: After CI passes for the first time, the workflow now routes back to the implementation agent to address PR comments before quality review
+  - Tracked via `pr-feedback:addressed` label on the workflow epic — only redirects once
+  - New `epicHasLabel()` and `addEpicLabel()` workflow helpers
+  - `PendingCIStep` now includes `agent` field for routing decisions
+- **Implementation agent PR feedback docs**: New "If Addressing PR Feedback" section in agent definition with instructions to check `gh pr view --json comments,reviews` and self-review the diff
+
 ## [0.5.0] - 2026-02-08
 
 ### Added

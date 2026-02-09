@@ -146,6 +146,40 @@ context: |
   Need help with: [specific question]
 ```
 
+## If Addressing PR Feedback
+
+When dispatched to address PR comments after CI passes:
+
+1. Check for reviewer comments and feedback:
+   ```bash
+   gh pr view PR_NUMBER --json comments,reviews
+   gh api repos/{owner}/{repo}/pulls/PR_NUMBER/comments
+   ```
+2. If comments exist, address each one specifically:
+   - Read and understand each comment
+   - Make the requested changes
+   - Reply to comments if helpful
+3. If no comments exist, do a self-review of the diff:
+   ```bash
+   gh pr diff PR_NUMBER
+   ```
+   - Look for obvious improvements, missing edge cases, or cleanup opportunities
+4. Run tests to verify changes
+5. Push changes (PR auto-updates)
+6. Handoff to quality_review
+
+```yaml
+next_agent: quality_review
+pr_number: [same PR]
+ci_status: pending
+context: |
+  Addressed PR feedback on PR #[N]:
+  - [What was addressed]
+  - [What was addressed]
+
+  Ready for quality review.
+```
+
 ## If Fixing Review Feedback
 
 When returning to fix issues from quality review:

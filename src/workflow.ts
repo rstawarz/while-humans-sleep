@@ -248,6 +248,7 @@ export interface PendingCIStep {
   epicId: string;
   prNumber: number;
   retryCount: number;
+  agent: string;
 }
 
 /**
@@ -275,6 +276,7 @@ export function getStepsPendingCI(): PendingCIStep[] {
           epicId: bead.parent || "",
           prNumber,
           retryCount,
+          agent: extractAgentFromBead(bead),
         };
       })
       .filter((step): step is PendingCIStep => step !== null);
@@ -785,6 +787,30 @@ export function getFirstAgent(workItem: WorkItem): string {
     default:
       return "implementation";
   }
+}
+
+/**
+ * Checks if a workflow epic has a specific label
+ */
+export function epicHasLabel(epicId: string, label: string): boolean {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const epic = beads.show(epicId, orchestratorPath);
+    return epic.labels?.includes(label) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Adds a label to a workflow epic
+ */
+export function addEpicLabel(epicId: string, label: string): void {
+  const orchestratorPath = getOrchestratorPath();
+  beads.update(epicId, orchestratorPath, {
+    labelAdd: [label],
+  });
 }
 
 /**

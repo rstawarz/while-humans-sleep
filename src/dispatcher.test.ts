@@ -86,6 +86,8 @@ vi.mock("./workflow.js", () => ({
   // CI checking functions
   getStepsPendingCI: vi.fn(() => []),
   updateStepCIStatus: vi.fn(),
+  epicHasLabel: vi.fn(() => false),
+  addEpicLabel: vi.fn(),
   // Error recovery functions
   errorWorkflow: vi.fn(),
   getErroredWorkflows: vi.fn(() => []),
@@ -1773,5 +1775,167 @@ describe("Errored workflow recovery", () => {
     (dispatcher as any).recoverErroredWorkflows();
 
     expect(mockWorkflow.retryWorkflow).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// PR Feedback Routing Tests
+// ============================================================
+
+describe("PR feedback routing on first CI pass", () => {
+  let mockBeads: any;
+  let mockWorkflow: any;
+  let mockNotifier: Notifier;
+
+  const testConfig: Config = {
+    projects: [
+      {
+        name: "test-project",
+        repoPath: "/home/user/work/test-project",
+        baseBranch: "main",
+        agentsPath: "docs/llm/agents",
+        beadsMode: "committed",
+      },
+    ],
+    orchestratorPath: "/home/user/work/whs-orchestrator",
+    concurrency: { maxTotal: 4, maxPerProject: 2 },
+    notifier: "cli",
+    runnerType: "cli",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockBeads = (await import("./beads/index.js")).beads;
+    mockWorkflow = await import("./workflow.js");
+
+    mockNotifier = {
+      notifyQuestion: vi.fn(),
+      notifyProgress: vi.fn(),
+      notifyComplete: vi.fn(),
+      notifyError: vi.fn(),
+      notifyRateLimit: vi.fn(),
+    };
+  });
+
+  it("redirects first CI pass for quality_review to implementation for PR feedback", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    // A quality_review step is waiting for CI
+    mockWorkflow.getStepsPendingCI.mockReturnValue([
+      {
+        id: "bd-w001.2",
+        epicId: "bd-w001",
+        prNumber: 42,
+        retryCount: 0,
+        agent: "quality_review",
+      },
+    ]);
+
+    // Epic does NOT have pr-feedback:addressed label (first CI pass)
+    mockWorkflow.epicHasLabel.mockReturnValue(false);
+
+    // No other ready steps or project beads
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([]);
+    mockBeads.ready.mockReturnValue([]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+
+    // Mock getGitHubCIStatus to return "passed"
+    (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+
+    await (dispatcher as any).tick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Should check the epic label
+    expect(mockWorkflow.epicHasLabel).toHaveBeenCalledWith("bd-w001", "pr-feedback:addressed");
+
+    // Should update CI status
+    expect(mockWorkflow.updateStepCIStatus).toHaveBeenCalledWith("bd-w001.2", "passed", 0);
+
+    // Should complete the current step
+    expect(mockWorkflow.completeStep).toHaveBeenCalledWith(
+      "bd-w001.2",
+      "Redirected to implementation for PR feedback review"
+    );
+
+    // Should create a new implementation step
+    expect(mockWorkflow.createNextStep).toHaveBeenCalledWith(
+      "bd-w001",
+      "implementation",
+      expect.stringContaining("CI passed for PR #42"),
+      { pr_number: 42, ci_status: "passed" }
+    );
+
+    // Should add the pr-feedback:addressed label
+    expect(mockWorkflow.addEpicLabel).toHaveBeenCalledWith("bd-w001", "pr-feedback:addressed");
+  });
+
+  it("unblocks quality_review normally on second CI pass (label present)", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getStepsPendingCI.mockReturnValue([
+      {
+        id: "bd-w001.4",
+        epicId: "bd-w001",
+        prNumber: 42,
+        retryCount: 0,
+        agent: "quality_review",
+      },
+    ]);
+
+    // Epic already HAS the pr-feedback:addressed label (second CI pass)
+    mockWorkflow.epicHasLabel.mockReturnValue(true);
+
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([]);
+    mockBeads.ready.mockReturnValue([]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+
+    await (dispatcher as any).tick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Should update CI status normally
+    expect(mockWorkflow.updateStepCIStatus).toHaveBeenCalledWith("bd-w001.4", "passed", 0);
+
+    // Should NOT create a new step or complete the current one
+    expect(mockWorkflow.completeStep).not.toHaveBeenCalled();
+    expect(mockWorkflow.createNextStep).not.toHaveBeenCalled();
+    expect(mockWorkflow.addEpicLabel).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect non-quality_review steps regardless of label", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getStepsPendingCI.mockReturnValue([
+      {
+        id: "bd-w001.3",
+        epicId: "bd-w001",
+        prNumber: 42,
+        retryCount: 0,
+        agent: "implementation",
+      },
+    ]);
+
+    // Epic does NOT have the label
+    mockWorkflow.epicHasLabel.mockReturnValue(false);
+
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([]);
+    mockBeads.ready.mockReturnValue([]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+
+    await (dispatcher as any).tick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Should just update CI status normally (no redirect for implementation steps)
+    expect(mockWorkflow.updateStepCIStatus).toHaveBeenCalledWith("bd-w001.3", "passed", 0);
+    expect(mockWorkflow.completeStep).not.toHaveBeenCalled();
+    expect(mockWorkflow.createNextStep).not.toHaveBeenCalled();
+    expect(mockWorkflow.addEpicLabel).not.toHaveBeenCalled();
   });
 });

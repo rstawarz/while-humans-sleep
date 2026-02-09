@@ -401,7 +401,7 @@ describe("workflow functions with mocked beads", () => {
   });
 
   describe("getStepsPendingCI", () => {
-    it("returns steps with ci:pending label and PR number", async () => {
+    it("returns steps with ci:pending label and PR number including agent", async () => {
       const { getStepsPendingCI } = await import("./workflow.js");
 
       mockBeads.list.mockReturnValue([
@@ -414,9 +414,9 @@ describe("workflow functions with mocked beads", () => {
         },
         {
           id: "bd-w002.1",
-          title: "quality_review",
+          title: "implementation",
           parent: "bd-w002",
-          labels: ["agent:quality_review", "whs:step", "ci:pending", "pr:99", "ci-retries:2"],
+          labels: ["agent:implementation", "whs:step", "ci:pending", "pr:99", "ci-retries:2"],
           status: "open",
         },
       ]);
@@ -429,12 +429,14 @@ describe("workflow functions with mocked beads", () => {
         epicId: "bd-w001",
         prNumber: 42,
         retryCount: 0,
+        agent: "quality_review",
       });
       expect(steps[1]).toEqual({
         id: "bd-w002.1",
         epicId: "bd-w002",
         prNumber: 99,
         retryCount: 2,
+        agent: "implementation",
       });
     });
 
@@ -777,6 +779,54 @@ describe("workflow functions with mocked beads", () => {
       const path = getOrchestratorPath();
 
       expect(path).toBe("/mock/orchestrator");
+    });
+  });
+
+  describe("epicHasLabel", () => {
+    it("returns true when epic has the label", async () => {
+      const { epicHasLabel } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        labels: ["project:test", "source:bd-123", "pr-feedback:addressed"],
+      });
+
+      expect(epicHasLabel("bd-w001", "pr-feedback:addressed")).toBe(true);
+    });
+
+    it("returns false when epic does not have the label", async () => {
+      const { epicHasLabel } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        labels: ["project:test", "source:bd-123"],
+      });
+
+      expect(epicHasLabel("bd-w001", "pr-feedback:addressed")).toBe(false);
+    });
+
+    it("returns false on error", async () => {
+      const { epicHasLabel } = await import("./workflow.js");
+
+      mockBeads.show.mockImplementation(() => {
+        throw new Error("Not found");
+      });
+
+      expect(epicHasLabel("bd-nonexistent", "pr-feedback:addressed")).toBe(false);
+    });
+  });
+
+  describe("addEpicLabel", () => {
+    it("calls beads.update with labelAdd", async () => {
+      const { addEpicLabel } = await import("./workflow.js");
+
+      addEpicLabel("bd-w001", "pr-feedback:addressed");
+
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        { labelAdd: ["pr-feedback:addressed"] }
+      );
     });
   });
 
