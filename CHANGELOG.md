@@ -5,6 +5,13 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-02-09
+
+### Fixed
+- **Metrics FK constraint**: Workflows started before metrics were wired up caused `FOREIGN KEY constraint failed` when dispatching their next step. `recordStepStart` now auto-creates a placeholder workflow row if missing
+- **Telegram MarkdownV2 escaping**: Agent names with underscores (e.g. `release_manager`) broke Telegram status messages — now properly escaped
+- **Duplicate log message**: Removed duplicate "Telegram bot started" log (service and CLI both logged it)
+
 ## [0.8.1] - 2026-02-09
 
 ### Added
