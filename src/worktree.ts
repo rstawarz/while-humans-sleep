@@ -129,14 +129,23 @@ export function ensureWorktree(
     return existing.path;
   }
 
-  // Create new worktree with branch
-  const args = ["switch", "--create", beadId];
-
+  // Create new worktree with branch — if the branch already exists
+  // (e.g., from a previous agent run), switch to it without --create
+  const createArgs = ["switch", "--create", beadId];
   if (options?.baseBranch) {
-    args.push("--base", options.baseBranch);
+    createArgs.push("--base", options.baseBranch);
   }
 
-  execWt(args, projectPath);
+  try {
+    execWt(createArgs, projectPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("already exists")) {
+      execWt(["switch", beadId], projectPath);
+    } else {
+      throw err;
+    }
+  }
 
   // Get the path of the newly created worktree
   const worktree = getWorktree(projectName, beadId);

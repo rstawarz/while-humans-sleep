@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-02-10
+
+### Fixed
+- **Worktree creation fails when branch already exists**: `ensureWorktree()` checked for existing worktrees but not bare branches. When a branch existed from a previous agent run without a checked-out worktree, `wt switch --create` failed. Now falls back to `wt switch` (without `--create`) when the branch already exists
+
 ## [0.9.2] - 2026-02-10
 
 ### Fixed
