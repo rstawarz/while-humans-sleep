@@ -53,23 +53,44 @@ gh pr checks --watch
 
 ### 3. Interpret Results
 
-| CI Status | Reviews | Decision |
-|-----------|---------|----------|
-| Passing | Approved or no blocking | `release_manager` |
-| Passing | Changes requested | `implementation` |
+| CI Status | Review Verdict | Decision |
+|-----------|---------------|----------|
+| Passing | PASS (no critical/major) | `release_manager` |
+| Passing | NEEDS_CHANGES | `implementation` |
+| Passing | No verdict (ambiguous) | `implementation` (default cautious) |
 | Failing | Any | `implementation` |
 | Pending (timeout) | Any | `BLOCKED` |
 
-### 4. Read Review Comments (if any)
+**Key principle: when in doubt, route to `implementation`.** Unnecessary work is cheaper than merging a bad PR.
+
+### 4. Read Review Comments
 
 ```bash
-gh pr view --json reviews,comments
+# Get the latest review comment body
+gh pr view PR_NUMBER --json comments --jq '.comments[-1].body'
 ```
 
-Look for:
-- Review decisions: APPROVED, CHANGES_REQUESTED
-- Specific feedback that needs addressing
-- Blocking vs non-blocking comments
+Parse the most recent code review comment for the structured format:
+
+**If the comment contains a verdict line (`**Verdict:** PASS` or `**Verdict:** NEEDS_CHANGES`):**
+- `PASS` with no Critical/Major sections → ready to merge
+- `NEEDS_CHANGES` or any Critical/Major items listed → route to implementation
+- Copy Critical and Major items verbatim into the handoff context
+
+**If the comment has no verdict (legacy/human comments):**
+- Read the comment content carefully for specific change requests
+- If it requests code changes, treat as NEEDS_CHANGES
+- If it's general praise or minor suggestions only, treat as PASS
+- **When in doubt, route to implementation** — unnecessary work is cheaper than merging a bad PR
+
+Also check for formal GitHub review decisions:
+
+```bash
+gh pr view --json reviews
+```
+
+- APPROVED with no blocking comment findings → ready to merge
+- CHANGES_REQUESTED → route to implementation
 
 ### 5. Handoff
 
@@ -85,22 +106,25 @@ context: |
   - Reviews: [Approved / No blocking feedback]
 ```
 
-**If changes needed:**
+**If changes needed (include specific findings from the review):**
 
 ```yaml
 next_agent: implementation
 pr_number: [PR number]
 ci_status: [passed/failed]
 context: |
-  PR #[N] needs changes.
+  PR #[N] has review feedback to address.
 
-  CI Status: [passing/failing]
+  Critical:
+  - [copied verbatim from review comment]
 
-  Issues to address:
-  - [From CI: test failures, lint errors]
-  - [From reviews: specific feedback]
+  Major:
+  - [copied verbatim from review comment]
 
-  Fix these and push updates.
+  CI Issues (if failing):
+  - [test failures, lint errors]
+
+  Fix these issues and push updates.
 ```
 
 **If UX changes needed:**
@@ -138,17 +162,20 @@ context: |
 
 - Wait for CI to complete
 - Read CI pass/fail status
-- Read existing review comments
+- Read existing review comments and parse the structured review format (verdict + severity levels)
+- Default to cautious routing when feedback is ambiguous
 - Synthesize signals into a routing decision
-- Provide clear context to the next agent
+- Copy specific Critical/Major findings into the handoff context for the next agent
 
 ## Quick Reference
 
 ```
-No PR exists                    -> implementation
-CI Passing + No Blocking Reviews -> release_manager
-CI Passing + Changes Requested  -> implementation
-CI Failing                      -> implementation
-Complex/Unclear                 -> architect
-CI Stuck                        -> BLOCKED
+No PR exists                          -> implementation
+CI Passing + Verdict: PASS            -> release_manager
+CI Passing + Verdict: NEEDS_CHANGES   -> implementation
+CI Passing + No verdict (ambiguous)   -> implementation (default cautious)
+CI Passing + Changes Requested review -> implementation
+CI Failing                            -> implementation
+Complex/Unclear                       -> architect
+CI Stuck                              -> BLOCKED
 ```
