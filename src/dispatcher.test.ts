@@ -1859,6 +1859,7 @@ describe("PR feedback routing on first CI pass", () => {
 
     // Mock getGitHubCIStatus to return "passed"
     (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+    (dispatcher as any).getPRMergeability = vi.fn(() => "MERGEABLE");
 
     await (dispatcher as any).tick();
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1887,6 +1888,45 @@ describe("PR feedback routing on first CI pass", () => {
     expect(mockWorkflow.addEpicLabel).toHaveBeenCalledWith("bd-w001", "pr-feedback:addressed");
   });
 
+  it("routes merge conflicts to implementation", async () => {
+    const { Dispatcher } = await import("./dispatcher.js");
+
+    mockWorkflow.getStepsPendingCI.mockReturnValue([
+      {
+        id: "bd-w001.2",
+        epicId: "bd-w001",
+        prNumber: 46,
+        retryCount: 0,
+        agent: "quality_review",
+      },
+    ]);
+
+    mockWorkflow.getReadyWorkflowSteps.mockReturnValue([]);
+    mockBeads.ready.mockReturnValue([]);
+
+    const dispatcher = new Dispatcher(testConfig, mockNotifier);
+    (dispatcher as any).running = true;
+    (dispatcher as any).getPRMergeability = vi.fn(() => "CONFLICTING");
+    (dispatcher as any).getGitHubCIStatus = vi.fn(() => "pending");
+
+    await (dispatcher as any).tick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Should complete the current step with merge_conflicts reason
+    expect(mockWorkflow.completeStep).toHaveBeenCalledWith("bd-w001.2", "merge_conflicts");
+
+    // Should create implementation step to resolve conflicts
+    expect(mockWorkflow.createNextStep).toHaveBeenCalledWith(
+      "bd-w001",
+      "implementation",
+      expect.stringContaining("merge conflicts"),
+      { pr_number: 46, ci_status: "failed" }
+    );
+
+    // Should NOT have checked CI status (short-circuited by conflict check)
+    expect((dispatcher as any).getGitHubCIStatus).not.toHaveBeenCalled();
+  });
+
   it("unblocks quality_review normally on second CI pass (label present)", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
 
@@ -1909,6 +1949,7 @@ describe("PR feedback routing on first CI pass", () => {
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
     (dispatcher as any).running = true;
     (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+    (dispatcher as any).getPRMergeability = vi.fn(() => "MERGEABLE");
 
     await (dispatcher as any).tick();
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1944,6 +1985,7 @@ describe("PR feedback routing on first CI pass", () => {
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
     (dispatcher as any).running = true;
     (dispatcher as any).getGitHubCIStatus = vi.fn(() => "passed");
+    (dispatcher as any).getPRMergeability = vi.fn(() => "MERGEABLE");
 
     await (dispatcher as any).tick();
     await new Promise((resolve) => setTimeout(resolve, 10));

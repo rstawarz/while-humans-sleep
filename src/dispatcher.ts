@@ -613,6 +613,23 @@ export class Dispatcher {
 
     for (const step of pendingSteps) {
       try {
+        // Check for merge conflicts before CI status — no point waiting for
+        // CI if the PR can't merge
+        const mergeability = this.getPRMergeability(step.prNumber);
+        if (mergeability === "CONFLICTING") {
+          console.log(`⚠️  PR #${step.prNumber} has merge conflicts`);
+          updateStepCIStatus(step.id, "failed", step.retryCount);
+          completeStep(step.id, "merge_conflicts");
+          createNextStep(
+            step.epicId,
+            "implementation",
+            `PR #${step.prNumber} has merge conflicts with the base branch. Resolve the conflicts and push updates.`,
+            { pr_number: step.prNumber, ci_status: "failed" }
+          );
+          console.log(`   Created implementation step to resolve merge conflicts`);
+          continue;
+        }
+
         const ciStatus = this.getGitHubCIStatus(step.prNumber);
 
         if (ciStatus === "pending") {
@@ -742,6 +759,26 @@ export class Dispatcher {
     } catch {
       // If gh command fails, treat as pending (will retry next tick)
       return "pending";
+    }
+  }
+
+  /**
+   * Checks if a PR has merge conflicts
+   *
+   * Returns: "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
+   */
+  private getPRMergeability(prNumber: number): "MERGEABLE" | "CONFLICTING" | "UNKNOWN" {
+    try {
+      const result = execSync(
+        `gh pr view ${prNumber} --json mergeable --jq '.mergeable'`,
+        { encoding: "utf-8", timeout: 30000 }
+      ).trim();
+
+      if (result === "CONFLICTING") return "CONFLICTING";
+      if (result === "MERGEABLE") return "MERGEABLE";
+      return "UNKNOWN";
+    } catch {
+      return "UNKNOWN";
     }
   }
 
