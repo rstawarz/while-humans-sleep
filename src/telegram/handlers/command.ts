@@ -7,9 +7,10 @@
 
 import type { Context } from "grammy";
 import type { TelegramHandler } from "./types.js";
+import type { AgentLogEvent } from "../../agent-log.js";
 import { getLockInfo, loadState } from "../../state.js";
 import { escapeMarkdownV2 } from "../formatter.js";
-import { getStatusData, formatDuration } from "../../status.js";
+import { getStatusData, getStepDetail, formatDuration } from "../../status.js";
 
 // Re-export formatDuration for backwards compatibility with tests
 export { formatDuration } from "../../status.js";
@@ -101,6 +102,13 @@ export class CommandHandler implements TelegramHandler {
   }
 
   private async handleStatus(ctx: Context): Promise<boolean> {
+    // Check for step argument: "/status orc-yq0.2" or "/status bridget_ai/orc-yq0.2"
+    const text = ctx.message?.text?.trim() || "";
+    const stepArg = text.replace(/^\/status\s*/, "").trim();
+    if (stepArg) {
+      return this.handleStepDetail(ctx, stepArg);
+    }
+
     const status = getStatusData();
     const lines: string[] = [];
 
@@ -172,5 +180,72 @@ export class CommandHandler implements TelegramHandler {
 
     await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
     return true;
+  }
+
+  private async handleStepDetail(ctx: Context, stepQuery: string): Promise<boolean> {
+    const detail = getStepDetail(stepQuery);
+    if (!detail) {
+      await ctx.reply(
+        `No active work found matching "${escapeMarkdownV2(stepQuery)}"\\.\nUse /status to see all active work\\.`,
+        { parse_mode: "MarkdownV2" }
+      );
+      return true;
+    }
+
+    const { work, recentActivity } = detail;
+    const duration = formatDuration(work.durationMs);
+    const lines: string[] = [];
+
+    lines.push(`*${escapeMarkdownV2(work.title)}*`);
+    lines.push(`${escapeMarkdownV2(work.source)} \\| ${escapeMarkdownV2(work.agent)} \\(step ${work.stepNumber}\\)`);
+    lines.push(`${escapeMarkdownV2(duration)} \\| ${escapeMarkdownV2("$" + work.cost.toFixed(4))}`);
+
+    if (work.prUrl) {
+      lines.push(`[PR \\#${work.prNumber}](${escapeMarkdownV2(work.prUrl)})`);
+    }
+
+    lines.push("");
+
+    if (recentActivity.length === 0) {
+      lines.push("_No activity logged yet\\._");
+    } else {
+      lines.push("*Recent Activity*");
+      const now = Math.floor(Date.now() / 1000);
+      // Show last 10 events to keep message manageable for Telegram
+      const events = recentActivity.slice(-10);
+      for (const event of events) {
+        const ago = formatSecondsAgo(now - event.t);
+        lines.push(escapeMarkdownV2(formatLogEventPlain(event, ago)));
+      }
+    }
+
+    await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
+    return true;
+  }
+}
+
+/** Format seconds as a human-readable "Xm ago" / "Xh ago" / "Xs ago" string */
+function formatSecondsAgo(seconds: number): string {
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m ago` : `${hours}h ago`;
+}
+
+/** Format an agent log event as a single plain-text line */
+function formatLogEventPlain(event: AgentLogEvent, ago: string): string {
+  switch (event.type) {
+    case "start":
+      return `[${ago}] > Started ${event.agent || "agent"}`;
+    case "tool":
+      return `[${ago}] @ ${event.name || "tool"}${event.input ? ": " + event.input : ""}`;
+    case "text":
+      return `[${ago}] ${event.text || ""}`;
+    case "end":
+      return `[${ago}] Done -> ${event.outcome || "unknown"}${event.cost != null ? ` ($${event.cost.toFixed(4)})` : ""}`;
+    default:
+      return `[${ago}] ${event.type}`;
   }
 }

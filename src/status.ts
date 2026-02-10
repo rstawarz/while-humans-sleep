@@ -11,6 +11,7 @@ import { loadConfig, expandPath } from "./config.js";
 import { beads } from "./beads/index.js";
 import { getErroredWorkflows, type ErroredWorkflow } from "./workflow.js";
 import { getTodayCost, getWorkflowSteps } from "./metrics.js";
+import { readAgentLog, type AgentLogEvent } from "./agent-log.js";
 import { VERSION } from "./version.js";
 import type { ActiveWork, Config, QuestionBeadData } from "./types.js";
 import type { Bead } from "./beads/types.js";
@@ -20,12 +21,18 @@ import type { Bead } from "./beads/types.js";
 export interface ActiveWorkInfo {
   title: string;
   source: string;       // "project/stepId"
+  stepId: string;        // workflow step bead ID
   agent: string;
   stepNumber: number;
   durationMs: number;
   cost: number;
   prNumber: number | null;
   prUrl: string | null;
+}
+
+export interface StepDetailData {
+  work: ActiveWorkInfo;
+  recentActivity: AgentLogEvent[];
 }
 
 export interface QuestionInfo {
@@ -129,6 +136,31 @@ export function getStatusData(): StatusData {
   return data;
 }
 
+/**
+ * Gets detailed status for a specific step, including recent agent activity.
+ *
+ * The query can be:
+ * - A step ID: "orc-yq0.2"
+ * - A project/step: "bridget_ai/orc-yq0.2"
+ *
+ * Returns null if the step is not found in active work.
+ */
+export function getStepDetail(stepQuery: string): StepDetailData | null {
+  const status = getStatusData();
+
+  // Find matching active work
+  const match = status.activeWork.find((w) => {
+    return w.source === stepQuery || w.stepId === stepQuery || w.source.endsWith("/" + stepQuery);
+  });
+
+  if (!match) return null;
+
+  // Read recent activity from the agent log
+  const recentActivity = readAgentLog(match.stepId, 20);
+
+  return { work: match, recentActivity };
+}
+
 // === Helpers ===
 
 function buildActiveWorkInfo(
@@ -178,7 +210,7 @@ function buildActiveWorkInfo(
     }
   }
 
-  return { title, source, agent: work.agent, stepNumber, durationMs, cost, prNumber, prUrl };
+  return { title, source, stepId: work.workflowStepId, agent: work.agent, stepNumber, durationMs, cost, prNumber, prUrl };
 }
 
 function extractPRNumber(labels: string[]): number | null {

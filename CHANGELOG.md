@@ -5,6 +5,16 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-02-09
+
+### Added
+- **Per-step status detail**: `whs status <step>` and Telegram `/status <step>` show detailed info for a specific active step — title, agent, duration, cost, PR link, and recent agent activity log
+- **Agent activity logging** (`src/agent-log.ts`): Compact JSONL logs at `.whs/logs/{stepId}.jsonl` written via dispatcher `onOutput`/`onToolUse` callbacks. Cleaned up on dispatcher start
+- **Agent log tests** (`src/agent-log.test.ts`): 16 tests covering write, read, truncation, limit, and cleanup
+
+### Changed
+- Dispatcher now logs agent start/tool/text/end events during execution for real-time visibility
+
 ## [0.8.0] - 2026-02-09
 
 ### Added

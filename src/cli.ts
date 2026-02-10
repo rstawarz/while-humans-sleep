@@ -31,7 +31,8 @@ import {
   getLockInfo,
 } from "./state.js";
 import { VERSION, getVersionString } from "./version.js";
-import { getStatusData, formatDuration } from "./status.js";
+import { getStatusData, getStepDetail, formatDuration } from "./status.js";
+import type { AgentLogEvent } from "./agent-log.js";
 
 const program = new Command();
 
@@ -1203,11 +1204,68 @@ program
     }
   });
 
+/** Format seconds as a human-readable "Xm ago" / "Xh ago" / "Xs ago" string */
+function formatSecondsAgo(seconds: number): string {
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m ago` : `${hours}h ago`;
+}
+
+/** Format an agent log event as a single-line summary */
+function formatLogEvent(event: AgentLogEvent, ago: string): string {
+  switch (event.type) {
+    case "start":
+      return `[${ago}] ▶ Started ${event.agent || "agent"}`;
+    case "tool":
+      return `[${ago}] 🔧 ${event.name || "tool"}${event.input ? ": " + event.input : ""}`;
+    case "text":
+      return `[${ago}] 💬 ${event.text || ""}`;
+    case "end":
+      return `[${ago}] ✓ Completed → ${event.outcome || "unknown"}${event.cost != null ? ` ($${event.cost.toFixed(4)})` : ""}`;
+    default:
+      return `[${ago}] ${event.type}`;
+  }
+}
+
 program
-  .command("status")
-  .description("Show dispatcher status")
+  .command("status [step]")
+  .description("Show dispatcher status, or detail for a specific step")
   .option("-v, --verbose", "Show detailed information")
-  .action((options) => {
+  .action((step, options) => {
+    // Per-step detail mode
+    if (step) {
+      const detail = getStepDetail(step);
+      if (!detail) {
+        console.log(`No active work found matching "${step}".`);
+        console.log("Use 'whs status' to see all active work.");
+        return;
+      }
+
+      const { work, recentActivity } = detail;
+      const duration = formatDuration(work.durationMs);
+      const prInfo = work.prUrl ? ` | PR #${work.prNumber}: ${work.prUrl}` : "";
+
+      console.log(`\n📋 ${work.title}`);
+      console.log(`   ${work.source} | ${work.agent} (step ${work.stepNumber}) | ${duration} | $${work.cost.toFixed(4)}${prInfo}\n`);
+
+      if (recentActivity.length === 0) {
+        console.log("   No activity logged yet.");
+      } else {
+        console.log("   Recent Activity:");
+        const now = Math.floor(Date.now() / 1000);
+        for (const event of recentActivity) {
+          const ago = formatSecondsAgo(now - event.t);
+          console.log(`   ${formatLogEvent(event, ago)}`);
+        }
+      }
+      console.log("");
+      return;
+    }
+
+    // Overview mode
     const status = getStatusData();
 
     console.log(`📊 Dispatcher Status (${getVersionString()})\n`);

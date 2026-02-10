@@ -65,6 +65,7 @@ import {
   recordStepStart,
   recordStepComplete,
 } from "./metrics.js";
+import { logAgentEvent, cleanAllLogs } from "./agent-log.js";
 import type { Bead } from "./beads/types.js";
 
 export class Dispatcher {
@@ -120,6 +121,9 @@ export class Dispatcher {
     }
 
     this.setupOutputInterceptor();
+
+    // Clean up agent logs from previous session
+    cleanAllLogs();
 
     console.log("🌙 While Humans Sleep - Starting dispatcher");
     console.log(`   PID: ${process.pid}`);
@@ -976,17 +980,21 @@ export class Dispatcher {
 
     await this.notifier.notifyProgress(work, `Running ${work.agent} agent`);
 
+    // Log step start
+    logAgentEvent(work.workflowStepId, { type: "start", agent: work.agent, step: work.workflowStepId });
+
     try {
       // Run the agent
       const result = await this.agentRunner.run({
         prompt,
         cwd: work.worktreePath,
         maxTurns: this.MAX_AGENT_TURNS,
-        onOutput: (_text) => {
-          // Could stream to notifier here
+        onOutput: (text) => {
+          logAgentEvent(work.workflowStepId, { type: "text", text });
         },
-        onToolUse: (_tool, _input) => {
-          // Could log tool use here
+        onToolUse: (tool, input) => {
+          const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+          logAgentEvent(work.workflowStepId, { type: "tool", name: tool, input: inputStr });
         },
       });
 
@@ -1052,16 +1060,20 @@ export class Dispatcher {
     this.lastOperation = `resumeAgentStep:${work.agent}:${work.workItem.project}/${work.workItem.id}`;
     await this.notifier.notifyProgress(work, `Resuming ${work.agent} agent with answer`);
 
+    // Log resume
+    logAgentEvent(work.workflowStepId, { type: "text", text: "Resuming with answer" });
+
     try {
       // Resume the agent session with the answer
       const result = await this.agentRunner.resumeWithAnswer(sessionId, answer, {
         cwd: work.worktreePath,
         maxTurns: this.MAX_AGENT_TURNS,
-        onOutput: (_text) => {
-          // Could stream to notifier here
+        onOutput: (text) => {
+          logAgentEvent(work.workflowStepId, { type: "text", text });
         },
-        onToolUse: (_tool, _input) => {
-          // Could log tool use here
+        onToolUse: (tool, input) => {
+          const inputStr = typeof input === "string" ? input : JSON.stringify(input);
+          logAgentEvent(work.workflowStepId, { type: "tool", name: tool, input: inputStr });
         },
       });
 
@@ -1167,6 +1179,9 @@ export class Dispatcher {
   ): Promise<void> {
     this.lastOperation = `processHandoff:${work.agent}->${handoff.next_agent}:${work.workItem.project}/${work.workItem.id}`;
     console.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
+
+    // Log step end
+    logAgentEvent(work.workflowStepId, { type: "end", agent: work.agent, outcome: handoff.next_agent, cost: stepCost });
 
     // Complete the current step
     completeStep(work.workflowStepId, handoff.context);

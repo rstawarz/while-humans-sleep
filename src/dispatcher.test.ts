@@ -128,6 +128,11 @@ vi.mock("./metrics.js", () => ({
   recordStepComplete: vi.fn(),
 }));
 
+vi.mock("./agent-log.js", () => ({
+  logAgentEvent: vi.fn(),
+  cleanAllLogs: vi.fn(),
+}));
+
 // Helper to wait for async operations to complete
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 10));
 

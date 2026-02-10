@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 
 // Read version from package.json at build time would require bundling
 // Instead, we hardcode it here and keep it in sync with package.json
-export const VERSION = "0.8.0";
+export const VERSION = "0.8.1";
 
 /**
  * Get the build timestamp (mtime of the compiled cli.js)
