@@ -59,6 +59,12 @@ import { ensureWorktree, removeWorktree } from "./worktree.js";
 import { formatAgentPrompt, type AgentRunner } from "./agent-runner.js";
 import { createAgentRunner } from "./agent-runner-factory.js";
 import { getHandoff, isValidAgent } from "./handoff.js";
+import {
+  recordWorkflowStart,
+  recordWorkflowComplete,
+  recordStepStart,
+  recordStepComplete,
+} from "./metrics.js";
 import type { Bead } from "./beads/types.js";
 
 export class Dispatcher {
@@ -83,7 +89,7 @@ export class Dispatcher {
   // Max dispatch attempts before circuit breaker trips
   private readonly MAX_DISPATCH_ATTEMPTS = 3;
   // Max agent turns — if agent uses this many, it likely hit the limit
-  private readonly MAX_AGENT_TURNS = 50;
+  private readonly MAX_AGENT_TURNS = 500;
 
   constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner) {
     this.config = config;
@@ -842,6 +848,10 @@ export class Dispatcher {
     const { epicId, stepId } = await startWorkflow(item.project, item, firstAgent);
     console.log(`   Created workflow ${epicId}, step ${stepId}`);
 
+    // Record metrics
+    recordWorkflowStart(epicId, item.project, item.id);
+    recordStepStart(stepId, epicId, firstAgent);
+
     // 3. Create worktree for this work item
     const worktreePath = ensureWorktree(item.project, item.id, {
       baseBranch: project.baseBranch,
@@ -930,6 +940,11 @@ export class Dispatcher {
     };
     this.state = addActiveWork(this.state, activeWork);
 
+    // Record step start in metrics (only for new dispatches, not resumes)
+    if (!resumeInfo) {
+      recordStepStart(step.id, epicId, agent);
+    }
+
     // Run or resume the agent
     if (resumeInfo) {
       // Clear the resume info now that we're using it
@@ -993,24 +1008,6 @@ export class Dispatcher {
         return;
       }
 
-      // Detect turn limit hit — agent used all available turns without finishing
-      if (result.turns >= this.MAX_AGENT_TURNS) {
-        console.warn(
-          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) — marking BLOCKED`
-        );
-        await this.notifier.notifyProgress(
-          work,
-          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
-        );
-        const blockedHandoff = {
-          next_agent: "BLOCKED",
-          context: `Agent exhausted all ${result.turns} turns without completing. ` +
-            `Output tail: ${result.output.slice(-500)}`,
-        };
-        await this.processHandoff(work, blockedHandoff, result.costUsd);
-        return;
-      }
-
       // Get handoff (trust but verify)
       const handoff = await getHandoff(
         result.output,
@@ -1018,6 +1015,21 @@ export class Dispatcher {
         work.worktreePath,
         this.agentRunner
       );
+
+      // Detect turn limit hit — but honor valid handoffs even at the limit
+      if (result.turns >= this.MAX_AGENT_TURNS && handoff.next_agent === "BLOCKED") {
+        console.warn(
+          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) with no valid handoff — marking BLOCKED`
+        );
+        await this.notifier.notifyProgress(
+          work,
+          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
+        );
+      } else if (result.turns >= this.MAX_AGENT_TURNS) {
+        console.log(
+          `ℹ️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) but produced valid handoff → ${handoff.next_agent}`
+        );
+      }
 
       // Process handoff
       await this.processHandoff(work, handoff, result.costUsd);
@@ -1071,24 +1083,6 @@ export class Dispatcher {
         return;
       }
 
-      // Detect turn limit hit
-      if (result.turns >= this.MAX_AGENT_TURNS) {
-        console.warn(
-          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) — marking BLOCKED`
-        );
-        await this.notifier.notifyProgress(
-          work,
-          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
-        );
-        const blockedHandoff = {
-          next_agent: "BLOCKED",
-          context: `Agent exhausted all ${result.turns} turns without completing. ` +
-            `Output tail: ${result.output.slice(-500)}`,
-        };
-        await this.processHandoff(work, blockedHandoff, result.costUsd);
-        return;
-      }
-
       // Get handoff (trust but verify)
       const handoff = await getHandoff(
         result.output,
@@ -1096,6 +1090,21 @@ export class Dispatcher {
         work.worktreePath,
         this.agentRunner
       );
+
+      // Detect turn limit hit — but honor valid handoffs even at the limit
+      if (result.turns >= this.MAX_AGENT_TURNS && handoff.next_agent === "BLOCKED") {
+        console.warn(
+          `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) with no valid handoff — marking BLOCKED`
+        );
+        await this.notifier.notifyProgress(
+          work,
+          `Agent hit turn limit (${result.turns} turns) — needs human intervention`
+        );
+      } else if (result.turns >= this.MAX_AGENT_TURNS) {
+        console.log(
+          `ℹ️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) but produced valid handoff → ${handoff.next_agent}`
+        );
+      }
 
       // Process handoff
       await this.processHandoff(work, handoff, result.costUsd);
@@ -1154,13 +1163,16 @@ export class Dispatcher {
   private async processHandoff(
     work: ActiveWork,
     handoff: { next_agent: string; pr_number?: number; ci_status?: string; context: string },
-    _stepCost: number
+    stepCost: number
   ): Promise<void> {
     this.lastOperation = `processHandoff:${work.agent}->${handoff.next_agent}:${work.workItem.project}/${work.workItem.id}`;
     console.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
 
     // Complete the current step
     completeStep(work.workflowStepId, handoff.context);
+
+    // Record step completion in metrics
+    recordStepComplete(work.workflowStepId, stepCost, handoff.next_agent);
 
     // Remove from active work
     this.state = removeActiveWork(this.state, work.workItem.id);
@@ -1194,6 +1206,7 @@ export class Dispatcher {
    */
   private async completeWorkflowSuccess(work: ActiveWork, reason: string): Promise<void> {
     completeWorkflow(work.workflowEpicId, "done", reason);
+    recordWorkflowComplete(work.workflowEpicId, "done");
 
     // Get the source bead info from the workflow epic (not from workItem.id which may be a step ID)
     const sourceInfo = getSourceBeadInfo(work.workflowEpicId);
@@ -1233,6 +1246,7 @@ export class Dispatcher {
    */
   private async markWorkflowBlocked(work: ActiveWork, reason: string): Promise<void> {
     completeWorkflow(work.workflowEpicId, "blocked", reason);
+    recordWorkflowComplete(work.workflowEpicId, "blocked");
     await this.notifier.notifyComplete(work, "blocked");
     console.log(`🚫 Workflow blocked: ${work.workItem.project}/${work.workItem.id} - ${reason}`);
   }
@@ -1260,6 +1274,7 @@ export class Dispatcher {
 
     // Mark workflow as errored (not blocked) — will auto-recover on restart
     errorWorkflow(work.workflowEpicId, `Authentication error: ${message}`, "auth");
+    recordWorkflowComplete(work.workflowEpicId, "error");
     this.state = removeActiveWork(this.state, work.workItem.id);
 
     // Stop the dispatcher entirely - auth errors affect all agents

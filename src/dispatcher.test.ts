@@ -121,6 +121,13 @@ vi.mock("./handoff.js", () => ({
   ),
 }));
 
+vi.mock("./metrics.js", () => ({
+  recordWorkflowStart: vi.fn(),
+  recordWorkflowComplete: vi.fn(),
+  recordStepStart: vi.fn(),
+  recordStepComplete: vi.fn(),
+}));
+
 // Helper to wait for async operations to complete
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 10));
 

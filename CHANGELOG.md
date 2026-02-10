@@ -5,6 +5,15 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-02-09
+
+### Fixed
+- **Turn limit handling**: Agents that hit the turn limit but produced a valid handoff were incorrectly marked BLOCKED. Now parses handoff before checking turn limit, honoring valid handoffs even at the limit
+- **Metrics not recording**: `recordWorkflowStart`, `recordStepStart`, `recordStepComplete`, and `recordWorkflowComplete` were never called from the dispatcher — metrics DB was always empty. Now wired up at all lifecycle points (runner-agnostic)
+
+### Changed
+- **Turn limit raised**: `MAX_AGENT_TURNS` increased from 50 to 500 — complex implementation tasks routinely need 40-60+ turns, 50 was too restrictive
+
 ## [0.7.0] - 2026-02-09
 
 ### Added

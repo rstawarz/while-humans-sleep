@@ -12,7 +12,6 @@ import type {
   AgentRunResult,
 } from "./agent-runner-interface.js";
 import type { Question } from "./types.js";
-import { recordStepComplete } from "./metrics.js";
 import { loadWhsEnv } from "./config.js";
 import {
   createBashSafetyHook,
@@ -159,15 +158,7 @@ export class ClaudeSdkAgentRunner implements AgentRunner {
       error = errMessage;
     }
 
-    // Record metrics if context provided
-    if (options.metricsContext?.stepId && !pendingQuestion) {
-      try {
-        const outcome = success ? "success" : (error || "unknown_error");
-        recordStepComplete(options.metricsContext.stepId, costUsd, outcome, turns, options.maxTurns);
-      } catch {
-        console.warn("Failed to record step metrics");
-      }
-    }
+    // Note: metrics recording is now handled by the dispatcher in processHandoff()
 
     const isAuthError = isAuthenticationError(output) || (error ? isAuthenticationError(error) : false);
 
