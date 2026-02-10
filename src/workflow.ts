@@ -207,6 +207,23 @@ export function getWorkflowEpic(stepId: string): Bead | null {
 }
 
 /**
+ * Resolve parent epic ID for a bead.
+ *
+ * bd list/ready --json don't include the parent field, so we fall back
+ * to bd show when it's missing. Consolidated here to avoid repeating
+ * this workaround at every call site.
+ */
+function resolveParentEpic(bead: Bead, orchestratorPath: string): string {
+  if (bead.parent) return bead.parent;
+  try {
+    const full = beads.show(bead.id, orchestratorPath);
+    return full.parent || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Gets ready workflow steps from the orchestrator
  *
  * Returns steps that are ready to be worked on (no blocking dependencies).
@@ -229,17 +246,7 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
       .filter((bead) => bead.status === "open")
       .filter((bead) => !bead.labels.includes("ci:pending"))
       .map((bead) => {
-        // bd ready --json doesn't include the parent field, so resolve it
-        // via bd show if missing
-        let epicId = bead.parent || "";
-        if (!epicId) {
-          try {
-            const full = beads.show(bead.id, orchestratorPath);
-            epicId = full.parent || "";
-          } catch {
-            // leave empty — dispatcher will warn and skip
-          }
-        }
+        const epicId = resolveParentEpic(bead, orchestratorPath);
         return {
           id: bead.id,
           epicId,
@@ -285,17 +292,7 @@ export function getStepsPendingCI(): PendingCIStep[] {
         const prNumber = extractPRNumber(bead.labels);
         const retryCount = extractCIRetryCount(bead.labels);
         if (prNumber === null) return null;
-        // bd list --json doesn't include the parent field, so resolve it
-        // via bd show if missing (same issue as bd ready --json)
-        let epicId = bead.parent || "";
-        if (!epicId) {
-          try {
-            const full = beads.show(bead.id, orchestratorPath);
-            epicId = full.parent || "";
-          } catch {
-            // leave empty — will be filtered out below
-          }
-        }
+        const epicId = resolveParentEpic(bead, orchestratorPath);
         const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
         const project = sourceInfo?.project || "";
         if (!project) return null;
