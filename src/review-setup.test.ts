@@ -100,7 +100,8 @@ describe("findClaudeReviewWorkflows", () => {
 });
 
 describe("updateWorkflowReviewPrompt", () => {
-  const tmpPath = "/tmp/whs-test-ci-workflow.yml";
+  // Use unique path per test runner to avoid race between src/ and dist/ tests
+  const tmpPath = `/tmp/whs-test-ci-workflow-${process.pid}.yml`;
 
   beforeEach(() => {
     vi.mocked(writeFileSync).mockClear();
