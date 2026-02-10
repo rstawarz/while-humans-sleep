@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-02-10
+
+### Fixed
+- **CI poller never found pending steps**: `bd list --json` (like `bd ready --json`) doesn't include the `parent` field. `getStepsPendingCI()` relied on `bead.parent` to resolve the project, so every step was silently filtered out. Now falls back to `bd show` to resolve the parent epic, matching the existing pattern in `getReadyWorkflowSteps()`
+
 ## [0.9.1] - 2026-02-10
 
 ### Fixed

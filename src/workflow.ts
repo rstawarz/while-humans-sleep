@@ -285,7 +285,17 @@ export function getStepsPendingCI(): PendingCIStep[] {
         const prNumber = extractPRNumber(bead.labels);
         const retryCount = extractCIRetryCount(bead.labels);
         if (prNumber === null) return null;
-        const epicId = bead.parent || "";
+        // bd list --json doesn't include the parent field, so resolve it
+        // via bd show if missing (same issue as bd ready --json)
+        let epicId = bead.parent || "";
+        if (!epicId) {
+          try {
+            const full = beads.show(bead.id, orchestratorPath);
+            epicId = full.parent || "";
+          } catch {
+            // leave empty — will be filtered out below
+          }
+        }
         const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
         const project = sourceInfo?.project || "";
         if (!project) return null;
