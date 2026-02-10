@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-02-10
+
+### Fixed
+- **Silent pause on startup**: Dispatcher loaded persisted `paused` state from a previous session but never logged it, making it appear to start successfully while doing nothing. Now emits a warning on startup when paused
+
 ## [0.9.0] - 2026-02-10
 
 ### Fixed

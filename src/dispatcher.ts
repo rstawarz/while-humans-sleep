@@ -164,6 +164,10 @@ export class Dispatcher {
       throw err;
     }
 
+    if (this.state.paused) {
+      console.log("⚠️  Dispatcher is PAUSED (from previous session). Run 'whs resume' to start processing.");
+    }
+
     // Recover any workflows that were marked errored (e.g., auth failures)
     // Now that preflight passed, these can be retried
     this.recoverErroredWorkflows();
