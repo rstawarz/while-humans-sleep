@@ -680,6 +680,7 @@ describe("Dispatcher E2E", () => {
       // Mock what dispatchWorkflowStep needs
       mockWorkflow.getWorkflowEpic.mockReturnValue({
         id: "bd-w001",
+        title: "test-project:bd-100 - Test task",
         labels: ["project:test-project", "source:bd-100"],
       });
       mockWorkflow.getWorkflowContext.mockReturnValue("context");
@@ -1068,6 +1069,7 @@ describe("Dispatch race condition prevention", () => {
 
     mockWorkflow.getWorkflowEpic.mockReturnValue({
       id: "bd-w001",
+      title: "test-project:bd-123 - Test task",
       labels: ["project:test-project", "source:bd-123"],
     });
     mockWorkflow.getSourceBeadInfo.mockReturnValue({
@@ -1119,6 +1121,7 @@ describe("Dispatch race condition prevention", () => {
 
     mockWorkflow.getWorkflowEpic.mockReturnValue({
       id: "bd-w001",
+      title: "test-project:bd-123 - Test task",
       labels: ["project:test-project", "source:bd-123"],
     });
     mockWorkflow.getSourceBeadInfo.mockReturnValue({
@@ -1400,6 +1403,7 @@ describe("Circuit breaker on dispatch failure", () => {
 
     mockWorkflow.getWorkflowEpic.mockReturnValue({
       id: "bd-w001",
+      title: "test-project:bd-123 - Test task",
       labels: ["project:test-project", "source:bd-123"],
     });
     mockWorkflow.getSourceBeadInfo.mockReturnValue({

@@ -27,19 +27,19 @@ export class CLINotifier implements Notifier {
 
   async notifyProgress(work: ActiveWork, message: string): Promise<void> {
     const timestamp = new Date().toISOString().split("T")[1].split(".")[0];
-    console.log(`[${timestamp}] [${work.workItem.project}/${work.workItem.id}] ${message}`);
+    console.log(`[${timestamp}] [${work.workItem.project}/${work.workItem.id} — ${work.workItem.title}] ${message}`);
   }
 
   async notifyComplete(work: ActiveWork, result: "done" | "blocked"): Promise<void> {
     const emoji = result === "done" ? "✅" : "🚫";
-    console.log(`\n${emoji} ${work.workItem.project}/${work.workItem.id} - ${result.toUpperCase()}`);
+    console.log(`\n${emoji} ${work.workItem.project}/${work.workItem.id} — ${work.workItem.title} - ${result.toUpperCase()}`);
     console.log(`   Agent: ${work.agent}`);
     console.log(`   Cost: $${work.costSoFar.toFixed(4)}`);
     console.log(`   Duration: ${this.formatDuration(work.startedAt)}\n`);
   }
 
   async notifyError(work: ActiveWork, error: Error): Promise<void> {
-    console.error(`\n❌ ERROR in ${work.workItem.project}/${work.workItem.id}`);
+    console.error(`\n❌ ERROR in ${work.workItem.project}/${work.workItem.id} — ${work.workItem.title}`);
     console.error(`   Agent: ${work.agent}`);
     console.error(`   Error: ${error.message}\n`);
   }

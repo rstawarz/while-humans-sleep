@@ -891,13 +891,15 @@ export class Dispatcher {
     }
 
     const agent = step.title; // Step title is the agent name
+    // Extract human-readable title from epic (format: "project:beadId - Title")
+    const epicTitle = epic.title.includes(" - ") ? epic.title.split(" - ").slice(1).join(" - ") : epic.title;
 
     // Check if this step has resume info (was blocked by a question that's now answered)
     const resumeInfo = getStepResumeInfo(step.id);
     if (resumeInfo) {
-      console.log(`🔄 Resuming ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} (answer provided)`);
+      console.log(`🔄 Resuming ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle} (answer provided)`);
     } else {
-      console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId}`);
+      console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle}`);
     }
 
     // Use worktree from resume info if available, otherwise ensure it exists
