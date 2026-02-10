@@ -328,7 +328,7 @@ describe("CommandHandler", () => {
       expect(replyText).toContain("Active Work");
       expect(replyText).toContain("Implement auth service");
       expect(replyText).toContain("bridget\\_ai/bai\\-zv0\\.1");
-      expect(replyText).toContain("quality_review");
+      expect(replyText).toContain("quality\\_review");
       expect(replyText).toContain("step 3");
       expect(replyText).toContain("45m");
       expect(replyText).toContain("$0\\.32");

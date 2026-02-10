@@ -139,7 +139,7 @@ export class CommandHandler implements TelegramHandler {
     for (const work of status.activeWork) {
       const duration = formatDuration(work.durationMs);
       const cost = "$" + work.cost.toFixed(2);
-      const stepInfo = `${work.agent} \\(step ${work.stepNumber}\\)`;
+      const stepInfo = `${escapeMarkdownV2(work.agent)} \\(step ${work.stepNumber}\\)`;
 
       lines.push(`  ${escapeMarkdownV2(work.title)}`);
       lines.push(`  ${escapeMarkdownV2(work.source)}`);

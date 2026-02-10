@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import {
   logAgentEvent,
   readAgentLog,
@@ -9,9 +10,9 @@ import {
   getAgentLogPath,
 } from "./agent-log.js";
 
-// Mock config to use a temp directory
-const TEST_DIR = join(process.cwd(), ".test-agent-log");
-const LOGS_DIR = join(TEST_DIR, "logs");
+// Use a unique temp directory per test run to avoid races between src and dist
+let TEST_DIR: string;
+let LOGS_DIR: string;
 
 vi.mock("./config.js", () => ({
   getConfigDir: () => TEST_DIR,
@@ -19,6 +20,8 @@ vi.mock("./config.js", () => ({
 
 describe("agent-log", () => {
   beforeEach(() => {
+    TEST_DIR = mkdtempSync(join(tmpdir(), "agent-log-test-"));
+    LOGS_DIR = join(TEST_DIR, "logs");
     mkdirSync(LOGS_DIR, { recursive: true });
   });
 
