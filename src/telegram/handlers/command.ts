@@ -186,7 +186,7 @@ export class CommandHandler implements TelegramHandler {
     const detail = getStepDetail(stepQuery);
     if (!detail) {
       await ctx.reply(
-        `No active work found matching "${escapeMarkdownV2(stepQuery)}"\\.\nUse /status to see all active work\\.`,
+        `No workflow found matching "${escapeMarkdownV2(stepQuery)}"\\.\nUse /status to see all active work\\.`,
         { parse_mode: "MarkdownV2" }
       );
       return true;
@@ -204,11 +204,31 @@ export class CommandHandler implements TelegramHandler {
       lines.push(`[PR \\#${work.prNumber}](${escapeMarkdownV2(work.prUrl)})`);
     }
 
+    // Show workflow status for bead-based lookups
+    if (detail.workflowStatus) {
+      lines.push(`Workflow: *${escapeMarkdownV2(detail.workflowStatus)}*`);
+    }
+
     lines.push("");
 
-    if (recentActivity.length === 0) {
+    // Show step history for bead-based lookups
+    if (detail.workflowSteps && detail.workflowSteps.length > 0) {
+      lines.push("*Step History*");
+      for (const s of detail.workflowSteps) {
+        const sDuration = formatDuration(s.durationMs);
+        const outcome = s.outcome || "in progress";
+        const sCost = s.cost > 0 ? ` \\| ${escapeMarkdownV2("$" + s.cost.toFixed(4))}` : "";
+        lines.push(
+          `${escapeMarkdownV2(s.agent)} → ${escapeMarkdownV2(outcome)} \\(${escapeMarkdownV2(sDuration)}${sCost}\\)`
+        );
+      }
+      lines.push("");
+    } else if (recentActivity.length === 0) {
       lines.push("_No activity logged yet\\._");
-    } else {
+    }
+
+    // Show recent activity (only for live/active steps)
+    if (recentActivity.length > 0) {
       lines.push("*Recent Activity*");
       const now = Math.floor(Date.now() / 1000);
       // Show last 10 events to keep message manageable for Telegram

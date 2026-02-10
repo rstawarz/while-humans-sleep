@@ -1844,6 +1844,7 @@ describe("PR feedback routing on first CI pass", () => {
         prNumber: 42,
         retryCount: 0,
         agent: "quality_review",
+        project: "test-project",
       },
     ]);
 
@@ -1898,6 +1899,7 @@ describe("PR feedback routing on first CI pass", () => {
         prNumber: 46,
         retryCount: 0,
         agent: "quality_review",
+        project: "test-project",
       },
     ]);
 
@@ -1937,6 +1939,7 @@ describe("PR feedback routing on first CI pass", () => {
         prNumber: 42,
         retryCount: 0,
         agent: "quality_review",
+        project: "test-project",
       },
     ]);
 
@@ -1973,6 +1976,7 @@ describe("PR feedback routing on first CI pass", () => {
         prNumber: 42,
         retryCount: 0,
         agent: "implementation",
+        project: "test-project",
       },
     ]);
 

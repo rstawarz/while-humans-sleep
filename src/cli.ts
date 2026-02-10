@@ -1239,7 +1239,7 @@ program
     if (step) {
       const detail = getStepDetail(step);
       if (!detail) {
-        console.log(`No active work found matching "${step}".`);
+        console.log(`No workflow found matching "${step}".`);
         console.log("Use 'whs status' to see all active work.");
         return;
       }
@@ -1249,19 +1249,39 @@ program
       const prInfo = work.prUrl ? ` | PR #${work.prNumber}: ${work.prUrl}` : "";
 
       console.log(`\n📋 ${work.title}`);
-      console.log(`   ${work.source} | ${work.agent} (step ${work.stepNumber}) | ${duration} | $${work.cost.toFixed(4)}${prInfo}\n`);
+      console.log(`   ${work.source} | ${work.agent} (step ${work.stepNumber}) | ${duration} | $${work.cost.toFixed(4)}${prInfo}`);
 
-      if (recentActivity.length === 0) {
+      // Show workflow status for bead-based lookups
+      if (detail.workflowStatus) {
+        console.log(`   Workflow: ${detail.workflowStatus}`);
+      }
+      console.log("");
+
+      // Show step history for bead-based lookups
+      if (detail.workflowSteps && detail.workflowSteps.length > 0) {
+        console.log("   Step History:");
+        for (const s of detail.workflowSteps) {
+          const sDuration = formatDuration(s.durationMs);
+          const outcome = s.outcome || "in progress";
+          const sCost = s.cost > 0 ? ` | $${s.cost.toFixed(4)}` : "";
+          console.log(`   ${s.stepId} ${s.agent} → ${outcome} (${sDuration}${sCost})`);
+        }
+        console.log("");
+      } else if (recentActivity.length === 0) {
         console.log("   No activity logged yet.");
-      } else {
+        console.log("");
+      }
+
+      // Show recent activity (only for live/active steps)
+      if (recentActivity.length > 0) {
         console.log("   Recent Activity:");
         const now = Math.floor(Date.now() / 1000);
         for (const event of recentActivity) {
           const ago = formatSecondsAgo(now - event.t);
           console.log(`   ${formatLogEvent(event, ago)}`);
         }
+        console.log("");
       }
-      console.log("");
       return;
     }
 

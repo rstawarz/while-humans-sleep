@@ -421,6 +421,12 @@ describe("workflow functions with mocked beads", () => {
         },
       ]);
 
+      // getStepsPendingCI now resolves project from epic labels via getSourceBeadInfo
+      mockBeads.show.mockImplementation((id: string) => ({
+        id,
+        labels: [`project:test-project`, `source:bd-123`],
+      }));
+
       const steps = getStepsPendingCI();
 
       expect(steps).toHaveLength(2);
@@ -430,6 +436,7 @@ describe("workflow functions with mocked beads", () => {
         prNumber: 42,
         retryCount: 0,
         agent: "quality_review",
+        project: "test-project",
       });
       expect(steps[1]).toEqual({
         id: "bd-w002.1",
@@ -437,6 +444,7 @@ describe("workflow functions with mocked beads", () => {
         prNumber: 99,
         retryCount: 2,
         agent: "implementation",
+        project: "test-project",
       });
     });
 

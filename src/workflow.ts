@@ -262,6 +262,7 @@ export interface PendingCIStep {
   prNumber: number;
   retryCount: number;
   agent: string;
+  project: string;
 }
 
 /**
@@ -284,12 +285,17 @@ export function getStepsPendingCI(): PendingCIStep[] {
         const prNumber = extractPRNumber(bead.labels);
         const retryCount = extractCIRetryCount(bead.labels);
         if (prNumber === null) return null;
+        const epicId = bead.parent || "";
+        const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
+        const project = sourceInfo?.project || "";
+        if (!project) return null;
         return {
           id: bead.id,
-          epicId: bead.parent || "",
+          epicId,
           prNumber,
           retryCount,
           agent: extractAgentFromBead(bead),
+          project,
         };
       })
       .filter((step): step is PendingCIStep => step !== null);

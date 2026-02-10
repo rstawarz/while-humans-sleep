@@ -613,9 +613,17 @@ export class Dispatcher {
 
     for (const step of pendingSteps) {
       try {
+        // Resolve the project's repo path so gh commands run in the right repo
+        const projectConfig = this.projects.get(step.project);
+        if (!projectConfig) {
+          console.warn(`Cannot resolve project "${step.project}" for CI check on PR #${step.prNumber}`);
+          continue;
+        }
+        const repoPath = expandPath(projectConfig.repoPath);
+
         // Check for merge conflicts before CI status — no point waiting for
         // CI if the PR can't merge
-        const mergeability = this.getPRMergeability(step.prNumber);
+        const mergeability = this.getPRMergeability(step.prNumber, repoPath);
         if (mergeability === "CONFLICTING") {
           console.log(`⚠️  PR #${step.prNumber} has merge conflicts`);
           updateStepCIStatus(step.id, "failed", step.retryCount);
@@ -630,7 +638,7 @@ export class Dispatcher {
           continue;
         }
 
-        const ciStatus = this.getGitHubCIStatus(step.prNumber);
+        const ciStatus = this.getGitHubCIStatus(step.prNumber, repoPath);
 
         if (ciStatus === "pending") {
           // Still running, skip
@@ -728,12 +736,12 @@ export class Dispatcher {
    *
    * Returns: "pending" | "passed" | "failed"
    */
-  private getGitHubCIStatus(prNumber: number): "pending" | "passed" | "failed" {
+  private getGitHubCIStatus(prNumber: number, cwd: string): "pending" | "passed" | "failed" {
     try {
       // Use gh pr checks to get CI status
       const result = execSync(
         `gh pr checks ${prNumber} --json state,bucket --jq '[.[] | .state] | unique'`,
-        { encoding: "utf-8", timeout: 30000 }
+        { encoding: "utf-8", timeout: 30000, cwd }
       ).trim();
 
       // Result is a JSON array like ["SUCCESS"] or ["PENDING"] or ["FAILURE", "SUCCESS"]
@@ -767,11 +775,11 @@ export class Dispatcher {
    *
    * Returns: "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
    */
-  private getPRMergeability(prNumber: number): "MERGEABLE" | "CONFLICTING" | "UNKNOWN" {
+  private getPRMergeability(prNumber: number, cwd: string): "MERGEABLE" | "CONFLICTING" | "UNKNOWN" {
     try {
       const result = execSync(
         `gh pr view ${prNumber} --json mergeable --jq '.mergeable'`,
-        { encoding: "utf-8", timeout: 30000 }
+        { encoding: "utf-8", timeout: 30000, cwd }
       ).trim();
 
       if (result === "CONFLICTING") return "CONFLICTING";
