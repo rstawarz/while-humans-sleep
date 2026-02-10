@@ -142,6 +142,18 @@ npm test           # Run tests
 npm run lint       # Lint code
 ```
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/):
+- **Patch** (0.0.x): Bug fixes, minor tweaks
+- **Minor** (0.x.0): New features, non-breaking changes
+- **Major** (x.0.0): Breaking changes
+
+When making changes that warrant a version bump:
+1. Update `package.json` and `src/version.ts` (both must match)
+2. Add an entry to `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/) format
+3. Commit version bump separately: `🔖 chore: bump version to X.Y.Z and update CHANGELOG`
+
 ## Architecture Principles
 
 1. **Orchestrator owns state** — Agents don't manage beads lifecycle, they just do work and produce handoffs
