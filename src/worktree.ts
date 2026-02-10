@@ -157,14 +157,22 @@ export function ensureWorktree(
 }
 
 /**
- * Gets a specific worktree by branch name
+ * Gets a specific worktree by branch name or path.
+ *
+ * Checks branch name first, then falls back to matching the worktree path.
+ * This handles agents that rename their branch (e.g., bai-zv0.6 →
+ * feature/action-items-task-view) — the path still ends with the bead ID.
  */
 export function getWorktree(
   projectName: string,
   branchName: string
 ): Worktree | null {
   const worktrees = listWorktrees(projectName);
-  return worktrees.find((w) => w.branch === branchName) || null;
+  return (
+    worktrees.find((w) => w.branch === branchName) ||
+    worktrees.find((w) => w.path.endsWith(`/${branchName}`)) ||
+    null
+  );
 }
 
 /**
