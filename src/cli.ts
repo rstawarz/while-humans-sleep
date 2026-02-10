@@ -606,6 +606,49 @@ program
         }
       }
 
+      // Code review format setup
+      if (!options.yes) {
+        const {
+          hasReviewFormat,
+          copyReviewFormat,
+          findClaudeReviewWorkflows,
+          updateWorkflowReviewPrompt,
+        } = await import("./review-setup.js");
+
+        console.log("");
+        console.log("  Code Review Setup");
+        console.log("  WHS uses structured code review output to help the quality review");
+        console.log("  agent make better routing decisions. This copies a review format");
+        console.log("  template into your project and can update CI workflows.");
+        console.log("");
+
+        const setupReview = await ask("  Set up code review format? (y/N): ");
+        if (setupReview.toLowerCase() === "y" || setupReview.toLowerCase() === "yes") {
+          if (hasReviewFormat(resolvedPath)) {
+            console.log("  ✓ docs/llm/code-review-output-format.md already exists");
+          } else {
+            copyReviewFormat(resolvedPath);
+            console.log("  ✓ Copied docs/llm/code-review-output-format.md");
+          }
+
+          const workflows = findClaudeReviewWorkflows(resolvedPath);
+          for (const workflow of workflows) {
+            console.log(`\n  Found workflow: ${workflow.filename}`);
+            const writeIt = await ask("  Update review prompt? (Y/n): ");
+            if (writeIt.toLowerCase() !== "n" && writeIt.toLowerCase() !== "no") {
+              const result = updateWorkflowReviewPrompt(workflow.path);
+              if (result.updated) {
+                console.log(`  ✓ Updated ${workflow.filename}`);
+              } else {
+                console.log(`  - ${workflow.filename}: ${result.reason}`);
+              }
+            }
+          }
+        } else {
+          console.log("  Skipped. Run 'whs setup review' later to set up review format.");
+        }
+      }
+
       // Add project to config
       const added = addProject(name, resolvedPath, {
         baseBranch,
@@ -1506,6 +1549,108 @@ setupCmd
       console.error(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
+  });
+
+setupCmd
+  .command("review [project]")
+  .description("Set up structured code review format for a project")
+  .option("--write", "Write changes without prompting")
+  .action(async (projectName: string | undefined, options: { write?: boolean }) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const config = loadConfig();
+
+    // Resolve project
+    let project = projectName ? getProject(projectName) : null;
+
+    if (!project) {
+      if (config.projects.length === 0) {
+        console.error("Error: No projects configured.");
+        console.error("Run `whs add <path>` to add a project first.");
+        process.exit(1);
+      }
+
+      if (config.projects.length === 1) {
+        project = config.projects[0];
+        projectName = project.name;
+      } else {
+        console.log("\nAvailable projects:");
+        for (const p of config.projects) {
+          console.log(`  - ${p.name}`);
+        }
+        console.error("\nSpecify a project: whs setup review <project>");
+        process.exit(1);
+      }
+    }
+
+    const projectPath = expandPath(project.repoPath);
+    console.log(`\n  Setting up code review format for: ${projectName}`);
+    console.log(`  Path: ${projectPath}\n`);
+
+    const {
+      hasReviewFormat,
+      copyReviewFormat,
+      findClaudeReviewWorkflows,
+      updateWorkflowReviewPrompt,
+      CI_REVIEW_PROMPT,
+    } = await import("./review-setup.js");
+
+    // 1. Copy review format doc
+    if (hasReviewFormat(projectPath)) {
+      console.log("  ✓ docs/llm/code-review-output-format.md already exists");
+    } else {
+      copyReviewFormat(projectPath);
+      console.log("  ✓ Copied docs/llm/code-review-output-format.md");
+    }
+
+    // 2. Find and update workflows
+    const workflows = findClaudeReviewWorkflows(projectPath);
+
+    if (workflows.length === 0) {
+      console.log("\n  No claude-code-action workflows found.");
+      console.log("  Recommended CI review prompt:\n");
+      for (const line of CI_REVIEW_PROMPT.split("\n")) {
+        console.log(`    ${line}`);
+      }
+      console.log("");
+      return;
+    }
+
+    for (const workflow of workflows) {
+      console.log(`\n  Found workflow: ${workflow.filename}`);
+
+      if (!options.write) {
+        // Interactive mode — ask before updating
+        const { createInterface } = await import("readline");
+        const rl = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+
+        const answer = await new Promise<string>((resolve) => {
+          rl.question("  Update review prompt in this workflow? (Y/n): ", (ans) => {
+            resolve(ans.trim());
+            rl.close();
+          });
+        });
+
+        if (answer.toLowerCase() === "n" || answer.toLowerCase() === "no") {
+          console.log("  Skipped.");
+          continue;
+        }
+      }
+
+      const result = updateWorkflowReviewPrompt(workflow.path);
+      if (result.updated) {
+        console.log(`  ✓ Updated ${workflow.filename}`);
+      } else {
+        console.log(`  - ${workflow.filename}: ${result.reason}`);
+      }
+    }
+
+    console.log("");
   });
 
 /**
