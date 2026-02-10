@@ -5,6 +5,16 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-09
+
+### Added
+- **Shared status module** (`src/status.ts`): Single source of truth for status data, eliminating duplicate logic between CLI `whs status` and Telegram `/status`
+- **PR links in status**: Active work items with associated PRs now show clickable links (GitHub URL derived from git remote). Visible in both CLI verbose output and Telegram status messages
+
+### Changed
+- CLI `whs status` and Telegram `/status` now use the same `getStatusData()` function for consistent output
+- CLI status now shows uptime, step number, and today's cost in default (non-verbose) view
+
 ## [0.7.1] - 2026-02-09
 
 ### Fixed

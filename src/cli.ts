@@ -27,11 +27,11 @@ import {
 import { beads } from "./beads/index.js";
 import {
   loadState,
-  getStateSummary,
   getStatePath,
   getLockInfo,
 } from "./state.js";
 import { VERSION, getVersionString } from "./version.js";
+import { getStatusData, formatDuration } from "./status.js";
 
 const program = new Command();
 
@@ -1208,56 +1208,47 @@ program
   .description("Show dispatcher status")
   .option("-v, --verbose", "Show detailed information")
   .action((options) => {
-    const config = loadConfig();
-    const state = loadState();
-    const summary = getStateSummary(state);
-    const lockInfo = getLockInfo();
-    const orchestratorPath = expandPath(config.orchestratorPath);
-
-    // Get pending questions from beads
-    let pendingQuestions: ReturnType<typeof beads.listPendingQuestions> = [];
-    try {
-      pendingQuestions = beads.listPendingQuestions(orchestratorPath);
-    } catch {
-      // Orchestrator may not be initialized
-    }
+    const status = getStatusData();
 
     console.log(`📊 Dispatcher Status (${getVersionString()})\n`);
 
     // Check if dispatcher is actually running
-    if (!lockInfo) {
+    if (!status.running) {
       console.log("  Status: Stopped");
-    } else if (summary.paused) {
-      console.log(`  Status: PAUSED (PID ${lockInfo.pid})`);
+    } else if (status.paused) {
+      console.log(`  Status: PAUSED (PID ${status.pid})`);
     } else {
-      console.log(`  Status: Running (PID ${lockInfo.pid})`);
+      console.log(`  Status: Running (PID ${status.pid})`);
+    }
+
+    if (status.running) {
+      console.log(`  Uptime: ${formatDuration(status.uptimeMs)}`);
     }
 
     // Active work
-    console.log(`  Active work: ${summary.activeWorkCount}`);
-    if (summary.activeWorkCount > 0) {
-      console.log(`  Active projects: ${summary.activeProjects.join(", ")}`);
-      if (summary.oldestWork) {
-        const elapsed = Date.now() - summary.oldestWork.getTime();
-        const minutes = Math.floor(elapsed / 60000);
-        console.log(`  Oldest work: ${minutes} minutes ago`);
-      }
+    console.log(`  Active work: ${status.activeWork.length}`);
+    if (status.activeWork.length > 0) {
+      const projects = [...new Set(status.activeWork.map((w) => w.source.split("/")[0]))];
+      console.log(`  Active projects: ${projects.join(", ")}`);
     }
 
     // Pending questions
-    console.log(`  Pending questions: ${pendingQuestions.length}`);
+    console.log(`  Pending questions: ${status.questions.length}`);
 
     // Beads daemon status
+    const config = loadConfig();
+    const orchestratorPath = expandPath(config.orchestratorPath);
+
     console.log(`\n🔮 Beads Daemons\n`);
     let allDaemonsRunning = true;
 
     for (const project of config.projects) {
       const projectPath = expandPath(project.repoPath);
-      const status = beads.daemonStatus(projectPath);
-      const statusIcon = status.running ? "✓" : "✗";
-      const statusText = status.running ? `running (PID ${status.pid})` : "stopped";
+      const daemonStatus = beads.daemonStatus(projectPath);
+      const statusIcon = daemonStatus.running ? "✓" : "✗";
+      const statusText = daemonStatus.running ? `running (PID ${daemonStatus.pid})` : "stopped";
       console.log(`  ${statusIcon} ${project.name}: ${statusText}`);
-      if (!status.running) allDaemonsRunning = false;
+      if (!daemonStatus.running) allDaemonsRunning = false;
     }
 
     // Orchestrator daemon
@@ -1271,36 +1262,36 @@ program
       console.log(`\n  ⚠️  Some daemons are not running. Run "whs start" to restart them.`);
     }
 
-    // Verbose output
+    // Verbose output — active work details
     if (options.verbose) {
       console.log(`\n📁 Paths\n`);
       console.log(`  Config: ${getConfigPath()}`);
       console.log(`  State: ${getStatePath()}`);
       console.log(`  Orchestrator: ${config.orchestratorPath}`);
-      console.log(`  Last updated: ${state.lastUpdated.toISOString()}`);
 
-      if (state.activeWork.size > 0) {
+      if (status.activeWork.length > 0) {
         console.log("\n📋 Active Work\n");
-        for (const [id, work] of state.activeWork) {
-          const elapsed = Math.floor((Date.now() - work.startedAt.getTime()) / 60000);
-          console.log(`  ${id} (${work.workItem.project}) — ${work.workItem.title}`);
-          console.log(`    Agent: ${work.agent}`);
-          console.log(`    Duration: ${elapsed} min`);
-          console.log(`    Cost: $${work.costSoFar.toFixed(4)}`);
+        for (const work of status.activeWork) {
+          const duration = formatDuration(work.durationMs);
+          const prInfo = work.prUrl ? ` | PR #${work.prNumber}: ${work.prUrl}` : "";
+          console.log(`  ${work.source} — ${work.title}`);
+          console.log(`    Agent: ${work.agent} (step ${work.stepNumber})`);
+          console.log(`    Duration: ${duration} | Cost: $${work.cost.toFixed(4)}${prInfo}`);
         }
       }
 
-      if (pendingQuestions.length > 0) {
+      if (status.questions.length > 0) {
         console.log("\n❓ Pending Questions\n");
-        for (const bead of pendingQuestions) {
-          const data = beads.parseQuestionData(bead);
-          console.log(`  ${bead.id} (${data.metadata.project})`);
-          console.log(`    Step: ${data.metadata.step_id}`);
-          console.log(`    Question: ${data.questions[0]?.question || "N/A"}`);
-          console.log(`    Asked: ${data.metadata.asked_at}`);
+        for (const q of status.questions) {
+          const suffix = q.project ? ` (${q.project})` : "";
+          console.log(`  ${q.id}${suffix}`);
+          console.log(`    ${q.question}`);
         }
       }
     }
+
+    // Today's cost
+    console.log(`\nToday: $${status.todayCost.toFixed(2)}`);
   });
 
 program
