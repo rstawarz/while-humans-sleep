@@ -5,6 +5,18 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-09
+
+### Added
+- **Structured code review format**: New `docs/llm/code-review-output-format.md` defines a PASS/NEEDS_CHANGES verdict with Critical/Major/Minor severity levels for CI code reviews
+- **Quality review agent update**: Parses structured review format, defaults to cautious routing (`implementation`) when feedback is ambiguous instead of sending straight to `release_manager`
+- **Review setup module** (`src/review-setup.ts`): Propagates review format doc and CI prompt into managed projects, finds and updates claude-code-action workflows
+- **`whs setup review [project]` command**: Standalone CLI command to set up review format in a project, with `--write` flag for non-interactive use
+- **`whs add` integration**: Review format setup offered as optional step during interactive project onboarding
+
+### Fixed
+- **Workflow step parent resolution**: `bd ready --json` doesn't include the `parent` field, causing "Cannot resolve project for step" errors on every tick. Now falls back to `bd show` to resolve the parent epic when missing
+
 ## [0.6.0] - 2026-02-09
 
 ### Added
