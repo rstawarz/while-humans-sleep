@@ -52,6 +52,29 @@ describe("formatAgentPrompt", () => {
     expect(prompt).not.toContain("## Workflow Context");
   });
 
+  it("includes branch name when provided", () => {
+    const prompt = formatAgentPrompt({
+      taskTitle: "Fix CI",
+      taskDescription: "Fix tests",
+      agentRole: "Engineer",
+      branchName: "bai-zv0.6",
+    });
+
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("branch `bai-zv0.6`");
+    expect(prompt).toContain("Do NOT rename, switch, or create new branches");
+  });
+
+  it("omits environment section when branchName not provided", () => {
+    const prompt = formatAgentPrompt({
+      taskTitle: "Fix CI",
+      taskDescription: "Fix tests",
+      agentRole: "Engineer",
+    });
+
+    expect(prompt).not.toContain("## Environment");
+  });
+
   it("includes all valid next_agent values", () => {
     const prompt = formatAgentPrompt({
       taskTitle: "Test",

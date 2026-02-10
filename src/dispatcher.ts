@@ -1020,11 +1020,13 @@ export class Dispatcher {
 
     // Build prompt for the agent
     const workflowContext = getWorkflowContext(work.workflowStepId);
+    const sourceInfo = getSourceBeadInfo(work.workflowEpicId);
     const prompt = formatAgentPrompt({
       taskTitle: work.workItem.title,
       taskDescription: work.workItem.description,
       workflowContext,
       agentRole: this.getAgentRole(work.agent),
+      branchName: sourceInfo?.beadId,
     });
 
     await this.notifier.notifyProgress(work, `Running ${work.agent} agent`);

@@ -147,6 +147,25 @@ program
   });
 
 program
+  .command("doctor")
+  .description("Check system health before starting")
+  .action(async () => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { runDoctorChecks, formatDoctorResults } = await import("./doctor.js");
+    const config = loadConfig();
+    const checks = await runDoctorChecks(config);
+    console.log(formatDoctorResults(checks));
+
+    const hasFail = checks.some((c) => c.status === "fail");
+    if (hasFail) {
+      process.exit(1);
+    }
+  });
+
+program
   .command("start")
   .description("Start the dispatcher")
   .action(async () => {

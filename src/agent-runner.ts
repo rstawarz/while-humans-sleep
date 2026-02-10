@@ -176,11 +176,20 @@ export function formatAgentPrompt(params: {
   taskDescription: string;
   workflowContext?: string;
   agentRole: string;
+  branchName?: string;
 }): string {
   const lines: string[] = [];
 
   lines.push(`# Task: ${params.taskTitle}`);
   lines.push("");
+
+  if (params.branchName) {
+    lines.push("## Environment");
+    lines.push(`You are working in an isolated worktree on branch \`${params.branchName}\`.`);
+    lines.push("Do NOT rename, switch, or create new branches. Push your work to this branch.");
+    lines.push("");
+  }
+
   lines.push("## Description");
   lines.push(params.taskDescription);
 
