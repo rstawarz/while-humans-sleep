@@ -228,13 +228,26 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
     return readyBeads
       .filter((bead) => bead.status === "open")
       .filter((bead) => !bead.labels.includes("ci:pending"))
-      .map((bead) => ({
-        id: bead.id,
-        epicId: bead.parent || "",
-        agent: extractAgentFromBead(bead),
-        context: bead.description || "",
-        status: bead.status as "open" | "in_progress" | "closed",
-      }));
+      .map((bead) => {
+        // bd ready --json doesn't include the parent field, so resolve it
+        // via bd show if missing
+        let epicId = bead.parent || "";
+        if (!epicId) {
+          try {
+            const full = beads.show(bead.id, orchestratorPath);
+            epicId = full.parent || "";
+          } catch {
+            // leave empty — dispatcher will warn and skip
+          }
+        }
+        return {
+          id: bead.id,
+          epicId,
+          agent: extractAgentFromBead(bead),
+          context: bead.description || "",
+          status: bead.status as "open" | "in_progress" | "closed",
+        };
+      });
   } catch {
     return [];
   }
