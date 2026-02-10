@@ -140,11 +140,7 @@ export class TelegramService implements Notifier {
     this.running = true;
 
     // Start the bot (long polling)
-    this.bot.start({
-      onStart: () => {
-        console.log("[Telegram] Bot started");
-      },
-    });
+    this.bot.start();
 
     // Start polling for questions to send
     this.pollTimer = setInterval(() => {
