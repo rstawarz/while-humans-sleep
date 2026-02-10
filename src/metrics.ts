@@ -189,6 +189,10 @@ export function recordWorkflowComplete(
 
 /**
  * Records the start of a step
+ *
+ * If the parent workflow doesn't exist in the DB (e.g. workflows started
+ * before metrics were wired up), creates a placeholder workflow row to
+ * satisfy the foreign key constraint.
  */
 export function recordStepStart(
   id: string,
@@ -196,6 +200,14 @@ export function recordStepStart(
   agent: string
 ): void {
   const database = getMetricsDb();
+
+  // Ensure the parent workflow exists (handles pre-metrics workflows)
+  const ensureWorkflow = database.prepare(`
+    INSERT OR IGNORE INTO workflow_runs (id, project, source_bead, started_at, status, total_cost)
+    VALUES (?, 'unknown', 'unknown', ?, 'running', 0)
+  `);
+  ensureWorkflow.run(workflowId, new Date().toISOString());
+
   const stmt = database.prepare(`
     INSERT INTO step_runs (id, workflow_id, agent, started_at, cost)
     VALUES (?, ?, ?, ?, 0)
