@@ -917,6 +917,7 @@ export class Dispatcher {
     const activeWork: ActiveWork = {
       workItem: {
         ...step,
+        title: epicTitle,
         project: sourceInfo.project,
       },
       workflowEpicId: epicId,

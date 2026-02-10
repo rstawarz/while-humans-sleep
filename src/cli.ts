@@ -1283,7 +1283,7 @@ program
         console.log("\n📋 Active Work\n");
         for (const [id, work] of state.activeWork) {
           const elapsed = Math.floor((Date.now() - work.startedAt.getTime()) / 60000);
-          console.log(`  ${id} (${work.workItem.project})`);
+          console.log(`  ${id} (${work.workItem.project}) — ${work.workItem.title}`);
           console.log(`    Agent: ${work.agent}`);
           console.log(`    Duration: ${elapsed} min`);
           console.log(`    Cost: $${work.costSoFar.toFixed(4)}`);
