@@ -5,6 +5,17 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-10
+
+### Fixed
+- **CI poller broken**: `getGitHubCIStatus()` and `getPRMergeability()` ran `gh` commands without `cwd`, so they targeted the WHS repo instead of the project repo. PRs stayed `ci:pending` forever. Now resolves each step's project and passes the correct repo path to all `gh` calls
+- **`/status <step>` only showed active work**: `getStepDetail()` only searched the in-memory `activeWork` map, so pending, blocked, completed, and errored workflows returned "No active work found"
+
+### Added
+- **Bead-based step detail**: `/status` and `whs status` now query orchestrator beads when a step isn't actively running, showing workflow status, step history, PR links, and cost data
+- **Multi-format status queries**: Step detail now accepts step IDs (`orc-zwx.3`), source beads (`bridget_ai/bai-zv0.4`), PR URLs (`https://github.com/.../pull/46`), and PR shorthand (`pr:46`, `#46`)
+- **`project` field on `PendingCIStep`**: CI poller steps now carry their project name, resolved from the parent epic's labels
+
 ## [0.8.3] - 2026-02-09
 
 ### Added
