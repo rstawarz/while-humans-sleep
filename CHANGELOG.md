@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Worktree not cleaned up after workflow completion**: `completeWorkflowSuccess` passed the step ID (e.g., `orc-pds.5`) to `removeWorktree` instead of the source bead ID (e.g., `bai-zv0.6`) which is used as the branch/worktree name. Completed workflows left worktrees behind indefinitely
 - **Retry workflow fails when all steps are closed**: `retryWorkflow()` used `beads.list` with `--parent` filter which doesn't return closed children, so retrying a workflow where the only step had failed produced no new step — leaving the workflow stranded. Now uses `bd show` to get all dependents (including closed) and creates a new step when all steps are closed
-- **Answered questions never resumed**: `getReadyWorkflowSteps()` filtered to `status === "open"` only, but steps paused for questions stay `in_progress` with a `whs:resume:` label. Answered questions were never picked up by the tick loop. Now includes `in_progress` steps that have resume info
+- **Answered questions never resumed**: Steps paused for questions stayed `in_progress`, but `getReadyWorkflowSteps()` only returned `open` steps. Answered questions were never picked up by the tick loop. Now resets the step to `open` when a question is asked — the question bead blocks it via dependency, and it naturally unblocks when the question is answered
 
 ## [0.10.2] - 2026-02-10
 
