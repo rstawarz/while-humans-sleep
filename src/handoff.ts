@@ -352,11 +352,12 @@ export async function getHandoff(
     }
   }
 
-  // 4. Fallback
+  // 4. Fallback — include tail of agent output for diagnostics
   console.warn("Failed to get handoff, returning BLOCKED");
+  const outputTail = output.trim().split("\n").slice(-20).join("\n");
   return {
     next_agent: "BLOCKED",
-    context: "Agent failed to produce a valid handoff. Manual intervention required.",
+    context: `Agent failed to produce a valid handoff. Manual intervention required.\n\nLast agent output:\n${outputTail}`,
   };
 }
 
