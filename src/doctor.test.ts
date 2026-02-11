@@ -282,7 +282,7 @@ describe("checkCIPendingPRs", () => {
 });
 
 describe("checkOrphanedWorktrees", () => {
-  it("passes when no orphaned worktrees", () => {
+  it("passes when all worktrees have active workflows", () => {
     vi.mocked(beads.list).mockReturnValue([
       {
         id: "orc-1",
@@ -310,10 +310,10 @@ describe("checkOrphanedWorktrees", () => {
     const result = checkOrphanedWorktrees(mockConfig);
 
     expect(result.status).toBe("pass");
-    expect(result.message).toContain("0 orphaned");
+    expect(result.message).toContain("1 active");
   });
 
-  it("warns on orphaned worktrees", () => {
+  it("shows open PR for unmanaged worktree", () => {
     vi.mocked(beads.list).mockReturnValue([]); // no active epics
     vi.mocked(listWorktrees)
       .mockReturnValueOnce([
@@ -321,12 +321,53 @@ describe("checkOrphanedWorktrees", () => {
         { branch: "old-branch", path: "/path/to/old", kind: "worktree", isMain: false, isCurrent: false },
       ])
       .mockReturnValueOnce([]);
+    vi.mocked(execSync).mockReturnValue(
+      JSON.stringify([{ number: 48, headRefName: "old-branch", state: "OPEN" }])
+    );
 
     const result = checkOrphanedWorktrees(mockConfig);
 
     expect(result.status).toBe("warn");
-    expect(result.message).toContain("1 orphaned");
-    expect(result.details?.[0]).toContain("argyn: old-branch");
+    expect(result.message).toContain("1 with open PR");
+    expect(result.details?.[0]).toContain("argyn/old-branch");
+    expect(result.details?.[0]).toContain("PR #48 open");
+    expect(result.details?.[0]).toContain("needs review/merge");
+  });
+
+  it("shows merged PR as safe to remove", () => {
+    vi.mocked(beads.list).mockReturnValue([]);
+    vi.mocked(listWorktrees)
+      .mockReturnValueOnce([
+        { branch: "main", path: "/path/to/main", kind: "worktree", isMain: true, isCurrent: true },
+        { branch: "done-branch", path: "/path/to/done", kind: "worktree", isMain: false, isCurrent: false },
+      ])
+      .mockReturnValueOnce([]);
+    vi.mocked(execSync).mockReturnValue(
+      JSON.stringify([{ number: 45, headRefName: "done-branch", state: "MERGED" }])
+    );
+
+    const result = checkOrphanedWorktrees(mockConfig);
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("1 safe to remove");
+    expect(result.details?.[0]).toContain("PR #45 merged");
+  });
+
+  it("shows no-PR worktree as unknown", () => {
+    vi.mocked(beads.list).mockReturnValue([]);
+    vi.mocked(listWorktrees)
+      .mockReturnValueOnce([
+        { branch: "main", path: "/path/to/main", kind: "worktree", isMain: true, isCurrent: true },
+        { branch: "mystery", path: "/path/to/mystery", kind: "worktree", isMain: false, isCurrent: false },
+      ])
+      .mockReturnValueOnce([]);
+    vi.mocked(execSync).mockReturnValue(JSON.stringify([]));
+
+    const result = checkOrphanedWorktrees(mockConfig);
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("1 with no PR");
+    expect(result.details?.[0]).toContain("argyn/mystery: no PR");
   });
 
   it("excludes beads-sync worktrees", () => {
@@ -344,7 +385,6 @@ describe("checkOrphanedWorktrees", () => {
     const result = checkOrphanedWorktrees(mockConfig);
 
     expect(result.status).toBe("pass");
-    expect(result.message).toContain("0 orphaned");
   });
 });
 

@@ -295,16 +295,61 @@ export function checkCIPendingPRs(config: Config): DoctorCheck {
   };
 }
 
+interface UnmanagedWorktree {
+  project: string;
+  branch: string;
+  prNumber?: number;
+  prState?: "OPEN" | "MERGED" | "CLOSED";
+}
+
 /**
- * Check 6: Orphaned worktrees
+ * Fetch all PRs for a project repo, returning a map of branch name → PR info.
+ */
+function getPRsByBranch(
+  repoPath: string
+): Map<string, { number: number; state: "OPEN" | "MERGED" | "CLOSED" }> {
+  const result = new Map<
+    string,
+    { number: number; state: "OPEN" | "MERGED" | "CLOSED" }
+  >();
+
+  try {
+    const json = execSync(
+      "gh pr list --state all --json number,headRefName,state --limit 100",
+      { encoding: "utf-8", timeout: 15000, cwd: repoPath }
+    ).trim();
+
+    const prs = JSON.parse(json) as Array<{
+      number: number;
+      headRefName: string;
+      state: "OPEN" | "MERGED" | "CLOSED";
+    }>;
+
+    for (const pr of prs) {
+      // Keep the most recent PR per branch (highest number)
+      const existing = result.get(pr.headRefName);
+      if (!existing || pr.number > existing.number) {
+        result.set(pr.headRefName, { number: pr.number, state: pr.state });
+      }
+    }
+  } catch {
+    // gh not available or not in a GitHub repo
+  }
+
+  return result;
+}
+
+/**
+ * Check 6: Unmanaged worktrees
  *
  * Lists worktrees per project and cross-references with orchestrator
- * active steps to find any that are no longer associated with a workflow.
+ * active workflows. Worktrees with no active workflow have their GitHub
+ * PR status checked to determine what action is needed.
  */
 export function checkOrphanedWorktrees(config: Config): DoctorCheck {
   const orchestratorPath = expandPath(config.orchestratorPath);
-  let totalWorktrees = 0;
-  const orphaned: string[] = [];
+  let activeCount = 0;
+  const unmanaged: UnmanagedWorktree[] = [];
 
   // Get all active workflow epics (open, in_progress, or blocked)
   let activeBeadIds: Set<string>;
@@ -325,25 +370,36 @@ export function checkOrphanedWorktrees(config: Config): DoctorCheck {
   } catch {
     // Can't check without orchestrator
     return {
-      name: "Orphaned worktrees",
+      name: "Worktrees",
       status: "pass",
       message: "skipped (orchestrator not initialized)",
     };
   }
 
+  // Collect unmanaged worktrees per project, then batch-check PRs
+  const unmanagedByProject = new Map<
+    string,
+    Array<{ branch: string; repoPath: string }>
+  >();
+
   for (const project of config.projects) {
     try {
       const worktrees = listWorktrees(project.name);
-      // Exclude main worktree and beads-internal worktrees (beads-sync)
       const nonMain = worktrees.filter(
         (w) => !w.isMain && !w.path.includes(".git/beads-worktrees")
       );
-      totalWorktrees += nonMain.length;
 
       for (const wt of nonMain) {
-        // The branch name is the source bead ID
-        if (!activeBeadIds.has(wt.branch)) {
-          orphaned.push(`${project.name}: ${wt.branch} (${wt.path})`);
+        if (activeBeadIds.has(wt.branch)) {
+          activeCount++;
+        } else {
+          if (!unmanagedByProject.has(project.name)) {
+            unmanagedByProject.set(project.name, []);
+          }
+          unmanagedByProject.get(project.name)!.push({
+            branch: wt.branch,
+            repoPath: expandPath(project.repoPath),
+          });
         }
       }
     } catch {
@@ -351,19 +407,62 @@ export function checkOrphanedWorktrees(config: Config): DoctorCheck {
     }
   }
 
-  if (orphaned.length === 0) {
+  // Batch-fetch PR status per project (one gh call per project)
+  for (const [projectName, worktrees] of unmanagedByProject) {
+    const repoPath = worktrees[0].repoPath;
+    const prMap = getPRsByBranch(repoPath);
+
+    for (const wt of worktrees) {
+      const pr = prMap.get(wt.branch);
+      unmanaged.push({
+        project: projectName,
+        branch: wt.branch,
+        prNumber: pr?.number,
+        prState: pr?.state,
+      });
+    }
+  }
+
+  if (unmanaged.length === 0) {
     return {
       name: "Worktrees",
       status: "pass",
-      message: `${totalWorktrees} active, 0 orphaned`,
+      message: `${activeCount} active`,
     };
   }
 
+  // Format details with PR status
+  const merged: string[] = [];
+  const openPR: string[] = [];
+  const noPR: string[] = [];
+
+  for (const wt of unmanaged) {
+    if (wt.prState === "MERGED") {
+      merged.push(`${wt.project}/${wt.branch}: PR #${wt.prNumber} merged — safe to remove`);
+    } else if (wt.prState === "OPEN") {
+      openPR.push(`${wt.project}/${wt.branch}: PR #${wt.prNumber} open — needs review/merge`);
+    } else if (wt.prState === "CLOSED") {
+      merged.push(`${wt.project}/${wt.branch}: PR #${wt.prNumber} closed — safe to remove`);
+    } else {
+      noPR.push(`${wt.project}/${wt.branch}: no PR`);
+    }
+  }
+
+  const details = [...openPR, ...noPR, ...merged];
+  const parts: string[] = [];
+  if (activeCount > 0) parts.push(`${activeCount} active`);
+  if (openPR.length > 0) parts.push(`${openPR.length} with open PR`);
+  if (merged.length > 0) parts.push(`${merged.length} safe to remove`);
+  if (noPR.length > 0) parts.push(`${noPR.length} with no PR`);
+
+  // Warn if there are open PRs or unknown worktrees, otherwise just info
+  const status = openPR.length > 0 || noPR.length > 0 ? "warn" : "pass";
+
   return {
     name: "Worktrees",
-    status: "warn",
-    message: `${totalWorktrees} total, ${orphaned.length} orphaned`,
-    details: orphaned,
+    status,
+    message: parts.join(", "),
+    details,
   };
 }
 
