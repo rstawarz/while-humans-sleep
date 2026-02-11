@@ -5,6 +5,16 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-02-10
+
+### Fixed
+- **Doctor worktree check showed false positives**: `checkOrphanedWorktrees` filtered on `whs:workflow` label that was never added to workflow epics, so all worktrees appeared unmanaged. Now lists all orchestrator epics and checks PR status via `gh pr list` to categorize worktrees as: active, open PR (needs review/merge), merged (safe to remove), or no PR
+- **Missing `whs:workflow` label on workflow epics**: `startWorkflow()` never added the label. Now included in epic creation
+- **Handoff fallback had no diagnostics**: When an agent failed to produce a handoff, the BLOCKED context was generic. Now includes the last 20 lines of agent output for debugging
+- **Doctor showed blocked workflows without reason**: Now reads the last "Blocked:" comment from the workflow to show why it was blocked
+- **Beads-sync worktrees were false positive orphans**: Internal `.git/beads-worktrees/beads-sync` worktrees are now excluded from the check
+- **Doctor pluralization**: "1 warning(s)" → "1 warning"
+
 ## [0.10.0] - 2026-02-10
 
 ### Added
