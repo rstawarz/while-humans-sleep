@@ -79,6 +79,7 @@ vi.mock("./workflow.js", () => ({
   getSourceBeadInfo: vi.fn(),
   getFirstAgent: vi.fn(() => "implementation"),
   markStepInProgress: vi.fn(),
+  markStepOpen: vi.fn(),
   resetStepForRetry: vi.fn(() => true),
   getWorkflowForSource: vi.fn(() => null),
   getStepResumeInfo: vi.fn(() => null),

@@ -240,13 +240,11 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
       labelAll: ["whs:step"],
     });
 
-    // Filter to open steps (or in_progress steps with a resume label — answered questions)
-    // Also skip steps with ci:pending label (waiting for CI to complete)
+    // Filter to only open steps that aren't waiting for CI
+    // Steps paused for questions are reset to open and blocked by the question bead,
+    // so they naturally reappear here once the question is answered and closed.
     return readyBeads
-      .filter((bead) =>
-        bead.status === "open" ||
-        (bead.status === "in_progress" && bead.labels.some((l) => l.startsWith(RESUME_LABEL_PREFIX)))
-      )
+      .filter((bead) => bead.status === "open")
       .filter((bead) => !bead.labels.includes("ci:pending"))
       .map((bead) => {
         const epicId = resolveParentEpic(bead, orchestratorPath);
@@ -442,6 +440,18 @@ export function markStepInProgress(stepId: string): void {
   const orchestratorPath = getOrchestratorPath();
   beads.update(stepId, orchestratorPath, {
     status: "in_progress",
+  });
+}
+
+/**
+ * Resets a step to open (e.g., when paused for a question).
+ * The step will be blocked by the question bead's dependency
+ * and won't appear in bd ready until the question is answered.
+ */
+export function markStepOpen(stepId: string): void {
+  const orchestratorPath = getOrchestratorPath();
+  beads.update(stepId, orchestratorPath, {
+    status: "open",
   });
 }
 

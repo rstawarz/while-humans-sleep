@@ -405,26 +405,7 @@ describe("workflow functions with mocked beads", () => {
       expect(steps[0].id).toBe("bd-w001.1");
     });
 
-    it("includes in_progress steps with resume label (answered questions)", async () => {
-      const { getReadyWorkflowSteps } = await import("./workflow.js");
-
-      mockBeads.ready.mockReturnValue([
-        {
-          id: "bd-w001.1",
-          title: "release_manager",
-          parent: "bd-w001",
-          labels: ["agent:release_manager", "whs:step", "whs:resume:eyJhIjoiYiJ9"],
-          status: "in_progress",
-        },
-      ]);
-
-      const steps = getReadyWorkflowSteps();
-
-      expect(steps).toHaveLength(1);
-      expect(steps[0].id).toBe("bd-w001.1");
-    });
-
-    it("filters out in_progress steps without resume label", async () => {
+    it("filters out in_progress steps", async () => {
       const { getReadyWorkflowSteps } = await import("./workflow.js");
 
       mockBeads.ready.mockReturnValue([
@@ -648,6 +629,20 @@ describe("workflow functions with mocked beads", () => {
         "bd-w001.1",
         "/mock/orchestrator",
         { status: "in_progress" }
+      );
+    });
+  });
+
+  describe("markStepOpen", () => {
+    it("resets step status to open", async () => {
+      const { markStepOpen } = await import("./workflow.js");
+
+      markStepOpen("bd-w001.1");
+
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001.1",
+        "/mock/orchestrator",
+        { status: "open" }
       );
     });
   });

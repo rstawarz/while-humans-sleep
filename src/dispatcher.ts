@@ -42,6 +42,7 @@ import {
   getSourceBeadInfo,
   getFirstAgent,
   markStepInProgress,
+  markStepOpen,
   resetStepForRetry,
   getWorkflowForSource,
   getStepResumeInfo,
@@ -1212,6 +1213,10 @@ export class Dispatcher {
       work.workflowEpicId,
       work.workflowStepId
     );
+
+    // Reset step to open — the question bead blocks it via dependency,
+    // so bd ready won't return it until the question is answered (bead closed).
+    markStepOpen(work.workflowStepId);
 
     // Remove from active work (paused until answered)
     this.state = removeActiveWork(this.state, work.workItem.id);
