@@ -328,6 +328,24 @@ describe("checkOrphanedWorktrees", () => {
     expect(result.message).toContain("1 orphaned");
     expect(result.details?.[0]).toContain("argyn: old-branch");
   });
+
+  it("excludes beads-sync worktrees", () => {
+    vi.mocked(beads.list).mockReturnValue([]); // no active epics
+    vi.mocked(listWorktrees)
+      .mockReturnValueOnce([
+        { branch: "main", path: "/work/argyn", kind: "worktree", isMain: true, isCurrent: true },
+        { branch: "beads-sync", path: "/work/argyn/.git/beads-worktrees/beads-sync", kind: "worktree", isMain: false, isCurrent: false },
+      ])
+      .mockReturnValueOnce([
+        { branch: "main", path: "/work/bridget_ai", kind: "worktree", isMain: true, isCurrent: true },
+        { branch: "beads-sync", path: "/work/bridget_ai/.git/beads-worktrees/beads-sync", kind: "worktree", isMain: false, isCurrent: false },
+      ]);
+
+    const result = checkOrphanedWorktrees(mockConfig);
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("0 orphaned");
+  });
 });
 
 describe("checkStateSanity", () => {
@@ -396,8 +414,8 @@ describe("formatDoctorResults", () => {
 
     expect(output).toContain("✗ Beads daemons: 1 not running");
     expect(output).toContain("⚠ State: paused");
-    expect(output).toContain("1 warning(s)");
-    expect(output).toContain("1 error(s)");
+    expect(output).toContain("1 warning");
+    expect(output).toContain("1 error");
   });
 });
 

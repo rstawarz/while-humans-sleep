@@ -334,8 +334,10 @@ export function checkOrphanedWorktrees(config: Config): DoctorCheck {
   for (const project of config.projects) {
     try {
       const worktrees = listWorktrees(project.name);
-      // Exclude main worktree
-      const nonMain = worktrees.filter((w) => !w.isMain);
+      // Exclude main worktree and beads-internal worktrees (beads-sync)
+      const nonMain = worktrees.filter(
+        (w) => !w.isMain && !w.path.includes(".git/beads-worktrees")
+      );
       totalWorktrees += nonMain.length;
 
       for (const wt of nonMain) {
@@ -441,8 +443,8 @@ export function formatDoctorResults(checks: DoctorCheck[]): string {
     lines.push("  Result: all checks passed");
   } else {
     const parts: string[] = [];
-    if (warnCount > 0) parts.push(`${warnCount} warning(s)`);
-    if (failCount > 0) parts.push(`${failCount} error(s)`);
+    if (warnCount > 0) parts.push(`${warnCount} ${warnCount === 1 ? "warning" : "warnings"}`);
+    if (failCount > 0) parts.push(`${failCount} ${failCount === 1 ? "error" : "errors"}`);
     lines.push(`  Result: ${parts.join(", ")}`);
   }
 
