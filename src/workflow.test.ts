@@ -117,7 +117,7 @@ describe("workflow functions with mocked beads", () => {
         expect.objectContaining({
           type: "epic",
           priority: 2,
-          labels: ["project:test", "source:bd-src"],
+          labels: ["whs:workflow", "project:test", "source:bd-src"],
         })
       );
 
@@ -519,7 +519,7 @@ describe("workflow functions with mocked beads", () => {
         {
           id: "bd-w001",
           title: "test:bd-src - Task",
-          labels: ["project:test", "source:bd-src"],
+          labels: ["whs:workflow", "project:test", "source:bd-src"],
           status: "open",
           created_at: "2024-01-15T10:00:00Z",
         },

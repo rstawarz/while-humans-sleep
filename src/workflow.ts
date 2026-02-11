@@ -78,7 +78,7 @@ export async function startWorkflow(
   const epic = beads.create(epicTitle, orchestratorPath, {
     type: "epic",
     priority: sourceBead.priority,
-    labels: [`project:${project}`, `source:${sourceBead.id}`],
+    labels: ["whs:workflow", `project:${project}`, `source:${sourceBead.id}`],
     description: epicDescription,
   });
 

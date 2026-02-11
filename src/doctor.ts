@@ -354,9 +354,11 @@ export function checkOrphanedWorktrees(config: Config): DoctorCheck {
   // Get all active workflow epics (open, in_progress, or blocked)
   let activeBeadIds: Set<string>;
   try {
+    // Match all workflow epics — new ones have whs:workflow, older ones
+    // only have source:* labels. Listing all epics is safe since the
+    // orchestrator only contains workflow epics.
     const epics = beads.list(orchestratorPath, {
       type: "epic",
-      labelAll: ["whs:workflow"],
     });
 
     activeBeadIds = new Set<string>();
