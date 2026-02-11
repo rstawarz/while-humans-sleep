@@ -240,11 +240,13 @@ export function getReadyWorkflowSteps(): WorkflowStep[] {
       labelAll: ["whs:step"],
     });
 
-    // Filter to only open steps that aren't waiting for CI
-    // bd ready returns both open and in_progress - we only want open
+    // Filter to open steps (or in_progress steps with a resume label — answered questions)
     // Also skip steps with ci:pending label (waiting for CI to complete)
     return readyBeads
-      .filter((bead) => bead.status === "open")
+      .filter((bead) =>
+        bead.status === "open" ||
+        (bead.status === "in_progress" && bead.labels.some((l) => l.startsWith(RESUME_LABEL_PREFIX)))
+      )
       .filter((bead) => !bead.labels.includes("ci:pending"))
       .map((bead) => {
         const epicId = resolveParentEpic(bead, orchestratorPath);
