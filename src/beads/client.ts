@@ -179,6 +179,17 @@ export class BeadsClient {
   }
 
   /**
+   * List comments on a bead
+   */
+  listComments(id: string, cwd: string): Array<{ id: number; issue_id: string; author: string; text: string; created_at: string }> {
+    try {
+      return this.exec(["comments", id], cwd) as Array<{ id: number; issue_id: string; author: string; text: string; created_at: string }>;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Add a dependency between beads
    */
   depAdd(childId: string, parentId: string, cwd: string): void {

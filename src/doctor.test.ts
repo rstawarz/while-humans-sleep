@@ -4,6 +4,7 @@ vi.mock("./beads/index.js", () => ({
   beads: {
     daemonStatus: vi.fn(),
     list: vi.fn(),
+    listComments: vi.fn().mockReturnValue([]),
   },
 }));
 
@@ -207,12 +208,16 @@ describe("checkBlockedWorkflows", () => {
       project: "bridget_ai",
       beadId: "bai-zv0.1",
     });
+    vi.mocked(beads.listComments).mockReturnValue([
+      { id: 1, issue_id: "orc-fcc", author: "whs", text: "Blocked: Agent failed to produce a valid handoff.", created_at: "2025-01-01T00:00:00Z" },
+    ]);
 
     const result = checkBlockedWorkflows(mockConfig);
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("1 blocked");
     expect(result.details?.[0]).toContain("bridget_ai/bai-zv0.1");
+    expect(result.details?.[0]).toContain("Agent failed to produce a valid handoff");
   });
 
   it("filters out closed workflows", () => {

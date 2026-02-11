@@ -174,7 +174,19 @@ export function checkBlockedWorkflows(config: Config): DoctorCheck {
       const source = sourceInfo
         ? `${sourceInfo.project}/${sourceInfo.beadId}`
         : "unknown";
-      return `${b.id} (${source})`;
+
+      // Get the last "Blocked:" comment as the reason
+      const comments = beads.listComments(b.id, orchestratorPath);
+      const blockedComment = [...comments]
+        .reverse()
+        .find((c) => c.text.startsWith("Blocked:"));
+      const reason = blockedComment
+        ? blockedComment.text.replace("Blocked: ", "")
+        : undefined;
+
+      return reason
+        ? `${b.id} (${source}) — ${reason}`
+        : `${b.id} (${source})`;
     });
 
     return {
