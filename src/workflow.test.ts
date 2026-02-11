@@ -4,6 +4,12 @@ import type { WorkItem, Handoff } from "./types.js";
 import type { WorkflowEpic, WorkflowStep } from "./workflow.js";
 import type { Bead } from "./beads/types.js";
 
+// Mock child_process for execSync calls
+const mockExecSync = vi.fn();
+vi.mock("child_process", () => ({
+  execSync: (...args: unknown[]) => mockExecSync(...args),
+}));
+
 // Mock the beads module
 vi.mock("./beads/index.js", () => ({
   beads: {
@@ -919,19 +925,21 @@ describe("workflow functions with mocked beads", () => {
   });
 
   describe("retryWorkflow", () => {
-    it("resets epic status and removes labels", async () => {
+    it("resets epic status and resets in_progress steps to open", async () => {
       const { retryWorkflow } = await import("./workflow.js");
 
-      // Mock finding in_progress steps under the epic
-      mockBeads.list.mockReturnValue([
-        {
-          id: "bd-w001.1",
-          title: "implementation",
-          labels: ["agent:implementation", "whs:step"],
-          status: "in_progress",
-          parent: "bd-w001",
-        },
-      ]);
+      // Mock bd show returning dependents with an in_progress step
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "in_progress",
+            labels: ["agent:implementation", "whs:step"],
+            title: "implementation",
+          },
+        ],
+      }]));
 
       retryWorkflow("bd-w001");
 
@@ -960,10 +968,21 @@ describe("workflow functions with mocked beads", () => {
       );
     });
 
-    it("handles no in_progress steps gracefully", async () => {
+    it("creates new step when all steps are closed", async () => {
       const { retryWorkflow } = await import("./workflow.js");
 
-      mockBeads.list.mockReturnValue([]);
+      // Mock bd show returning only closed steps
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "closed",
+            labels: ["agent:implementation", "whs:step"],
+            title: "implementation",
+          },
+        ],
+      }]));
 
       retryWorkflow("bd-w001");
 
@@ -975,13 +994,46 @@ describe("workflow functions with mocked beads", () => {
           status: "open",
         })
       );
+
+      // Should create a new step for the last agent (implementation)
+      expect(mockBeads.create).toHaveBeenCalledWith(
+        "implementation",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          parent: "bd-w001",
+          type: "task",
+        })
+      );
     });
 
-    it("handles step list error gracefully", async () => {
+    it("handles no dependents gracefully", async () => {
       const { retryWorkflow } = await import("./workflow.js");
 
-      mockBeads.list.mockImplementation(() => {
-        throw new Error("Failed to list");
+      // Mock bd show returning no dependents
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+      }]));
+
+      retryWorkflow("bd-w001");
+
+      // Epic should still be reset
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "open",
+        })
+      );
+
+      // No step should be created (no steps to resume from)
+      expect(mockBeads.create).not.toHaveBeenCalled();
+    });
+
+    it("handles bd show error gracefully", async () => {
+      const { retryWorkflow } = await import("./workflow.js");
+
+      mockExecSync.mockImplementation(() => {
+        throw new Error("Failed to show");
       });
 
       // Should not throw

@@ -1296,15 +1296,15 @@ export class Dispatcher {
       }
     }
 
-    // Clean up worktree
+    // Clean up worktree (branch is named after the source bead ID, not the step ID)
     try {
-      removeWorktree(work.workItem.project, work.workItem.id);
-    } catch {
-      // May fail if branch not merged yet
+      removeWorktree(sourceInfo.project, sourceInfo.beadId, { force: true });
+    } catch (err) {
+      console.warn(`Failed to remove worktree ${sourceInfo.project}/${sourceInfo.beadId}: ${err}`);
     }
 
     await this.notifier.notifyComplete(work, "done");
-    console.log(`✅ Workflow complete: ${work.workItem.project}/${work.workItem.id}`);
+    console.log(`✅ Workflow complete: ${sourceInfo.project}/${sourceInfo.beadId}`);
   }
 
   /**

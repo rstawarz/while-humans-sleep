@@ -6,6 +6,7 @@
  * representing individual agent runs.
  */
 
+import { execSync } from "child_process";
 import { beads } from "./beads/index.js";
 import { loadConfig, expandPath, getProject } from "./config.js";
 import type { WorkItem, Handoff } from "./types.js";
@@ -737,18 +738,40 @@ export function retryWorkflow(epicId: string): void {
   });
   beads.comment(epicId, "Retrying workflow", orchestratorPath);
 
-  // Find in_progress steps under the epic and reset to open
+  // Get all steps via bd show (bd list --parent misses closed children)
   try {
-    const steps = beads.list(orchestratorPath, {
-      type: "task",
-      status: "in_progress",
-      parent: epicId,
-    });
+    const raw = execSync(`bd show ${epicId} --json`, {
+      cwd: orchestratorPath,
+      encoding: "utf-8",
+      timeout: 10000,
+    }).trim();
+    const data = JSON.parse(raw) as Array<{
+      dependents?: Array<{
+        id: string;
+        status: string;
+        labels?: string[];
+        title?: string;
+      }>;
+    }>;
+    const steps = data[0]?.dependents ?? [];
 
+    let hasOpenOrInProgress = false;
     for (const step of steps) {
-      beads.update(step.id, orchestratorPath, {
-        status: "open",
-      });
+      if (step.status === "in_progress") {
+        beads.update(step.id, orchestratorPath, { status: "open" });
+        hasOpenOrInProgress = true;
+      } else if (step.status === "open") {
+        hasOpenOrInProgress = true;
+      }
+    }
+
+    // If all steps are closed, create a new step to resume from the last agent
+    if (!hasOpenOrInProgress && steps.length > 0) {
+      const lastStep = steps[steps.length - 1];
+      const agentLabel = lastStep.labels?.find((l) => l.startsWith("agent:"));
+      const agent = agentLabel?.replace("agent:", "") || "implementation";
+      const description = `Retrying workflow — previous ${agent} step failed.`;
+      createNextStep(epicId, agent, description);
     }
   } catch {
     // Best effort — steps may not exist
