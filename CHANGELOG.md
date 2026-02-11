@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-02-10
+
+### Fixed
+- **Doctor worktree check too noisy**: Open PRs, merged PRs, and unknown worktrees were triggering warnings even though the system can handle them or they're harmless cleanup candidates. Now only warns when manual intervention is actually needed
+
 ## [0.10.1] - 2026-02-10
 
 ### Fixed

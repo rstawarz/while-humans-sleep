@@ -457,8 +457,11 @@ export function checkOrphanedWorktrees(config: Config): DoctorCheck {
   if (merged.length > 0) parts.push(`${merged.length} safe to remove`);
   if (noPR.length > 0) parts.push(`${noPR.length} with no PR`);
 
-  // Warn if there are open PRs or unknown worktrees, otherwise just info
-  const status = openPR.length > 0 || noPR.length > 0 ? "warn" : "pass";
+  // Only warn if something actually needs manual intervention.
+  // Open PRs, merged PRs, and unknown worktrees are informational —
+  // the system can handle open PRs via active workflows, and the rest
+  // are harmless cleanup candidates.
+  const status: DoctorCheck["status"] = "pass";
 
   return {
     name: "Worktrees",

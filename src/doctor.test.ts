@@ -327,7 +327,7 @@ describe("checkOrphanedWorktrees", () => {
 
     const result = checkOrphanedWorktrees(mockConfig);
 
-    expect(result.status).toBe("warn");
+    expect(result.status).toBe("pass");
     expect(result.message).toContain("1 with open PR");
     expect(result.details?.[0]).toContain("argyn/old-branch");
     expect(result.details?.[0]).toContain("PR #48 open");
@@ -365,7 +365,7 @@ describe("checkOrphanedWorktrees", () => {
 
     const result = checkOrphanedWorktrees(mockConfig);
 
-    expect(result.status).toBe("warn");
+    expect(result.status).toBe("pass");
     expect(result.message).toContain("1 with no PR");
     expect(result.details?.[0]).toContain("argyn/mystery: no PR");
   });
