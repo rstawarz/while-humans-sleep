@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-12
+
+### Added
+- **`whs plan --file` flag**: Feed an existing plan document to the planner agent. `whs plan --file docs/plans/ux-master-plan.md` reads the file and injects its content into the planning task so the planner agent receives the full plan as context, analyzes the codebase, and creates beads epics/tasks. Derives title from filename if no description given
+
 ## [0.12.2] - 2026-02-11
 
 ### Fixed
