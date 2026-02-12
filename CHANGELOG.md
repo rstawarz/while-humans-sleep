@@ -5,6 +5,15 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-11
+
+### Added
+- **TUI dashboard**: `whs start` now renders an ink-based terminal dashboard showing agent panels, log stream, and status bar. Use `--no-tui` for plain console output. Adds `Logger` interface to abstract dispatcher output
+- **Auto-cleanup merged worktrees**: Dispatcher periodically removes worktrees whose branches are integrated into main (every ~5 min alongside daemon health checks)
+
+### Fixed
+- **Telegram emoji rendering**: `/doctor` and `/retry` commands showed literal `u2705` text instead of emoji — now uses actual Unicode characters
+
 ## [0.11.0] - 2026-02-11
 
 ### Added
