@@ -263,13 +263,13 @@ export class CommandHandler implements TelegramHandler {
       const checks = await runDoctorChecks(config);
       const lines: string[] = [];
 
-      lines.push("\\U0001FA7A *WHS Doctor*");
+      lines.push("🩺 *WHS Doctor*");
       lines.push("");
 
       const icons: Record<DoctorCheck["status"], string> = {
-        pass: "\\u2705",
-        warn: "\\u26A0\\uFE0F",
-        fail: "\\u274C",
+        pass: "✅",
+        warn: "⚠️",
+        fail: "❌",
       };
 
       for (const check of checks) {
@@ -305,7 +305,7 @@ export class CommandHandler implements TelegramHandler {
       await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
     } catch (err) {
       await ctx.reply(
-        `\\u274C Doctor failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        `❌ Doctor failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
         { parse_mode: "MarkdownV2" }
       );
     }
@@ -344,12 +344,12 @@ export class CommandHandler implements TelegramHandler {
       retryWorkflow(resolvedEpicId);
 
       await ctx.reply(
-        `\\U0001F504 Retried workflow ${escapeMarkdownV2(resolvedEpicId)}${sourceLabel}\n\nWill pick up on next dispatcher tick\\.`,
+        `🔄 Retried workflow ${escapeMarkdownV2(resolvedEpicId)}${sourceLabel}\n\nWill pick up on next dispatcher tick\\.`,
         { parse_mode: "MarkdownV2" }
       );
     } catch (err) {
       await ctx.reply(
-        `\\u274C Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        `❌ Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
         { parse_mode: "MarkdownV2" }
       );
     }
@@ -373,18 +373,18 @@ export class CommandHandler implements TelegramHandler {
         try {
           retryWorkflow(workflow.epicId);
           results.push(
-            `\\u2705 ${escapeMarkdownV2(workflow.epicId)} \\(${escapeMarkdownV2(workflow.sourceProject + "/" + workflow.sourceBeadId)}\\)`
+            `✅ ${escapeMarkdownV2(workflow.epicId)} \\(${escapeMarkdownV2(workflow.sourceProject + "/" + workflow.sourceBeadId)}\\)`
           );
         } catch (err) {
           results.push(
-            `\\u274C ${escapeMarkdownV2(workflow.epicId)}: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`
+            `❌ ${escapeMarkdownV2(workflow.epicId)}: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`
           );
         }
       }
 
       const lines: string[] = [];
       lines.push(
-        `\\U0001F504 Retried ${errored.length} workflow\\(s\\):`
+        `🔄 Retried ${errored.length} workflow\\(s\\):`
       );
       for (const r of results) {
         lines.push(`  ${r}`);
@@ -395,7 +395,7 @@ export class CommandHandler implements TelegramHandler {
       await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
     } catch (err) {
       await ctx.reply(
-        `\\u274C Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        `❌ Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
         { parse_mode: "MarkdownV2" }
       );
     }
