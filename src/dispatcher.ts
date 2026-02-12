@@ -489,16 +489,27 @@ export class Dispatcher {
   /**
    * Clean up worktrees whose branches have been merged into main.
    * Runs periodically alongside daemon health checks.
+   *
+   * Fetches origin first so worktrunk can see remote merges
+   * (without this, branches merged via GitHub PR still appear
+   * as "ahead" of the stale local main ref).
    */
   private cleanupMergedWorktrees(): void {
     for (const project of this.projects.values()) {
       try {
+        const projectPath = expandPath(project.repoPath);
+        execSync("git fetch origin", {
+          cwd: projectPath,
+          encoding: "utf-8",
+          timeout: 15000,
+          stdio: "pipe",
+        });
         const removed = cleanupWorktrees(project.name);
         for (const branch of removed) {
           this.logger.log(`🧹 Cleaned up merged worktree: ${project.name}/${branch}`);
         }
       } catch {
-        // Non-critical — don't log noise if wt isn't available
+        // Non-critical — don't log noise if fetch/wt fails
       }
     }
   }
