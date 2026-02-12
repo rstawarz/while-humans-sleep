@@ -127,6 +127,7 @@ vi.mock("./metrics.js", () => ({
   recordWorkflowComplete: vi.fn(),
   recordStepStart: vi.fn(),
   recordStepComplete: vi.fn(),
+  getTodayCost: vi.fn(() => 0),
 }));
 
 vi.mock("./agent-log.js", () => ({
@@ -733,6 +734,8 @@ describe("Dispatcher E2E", () => {
         active: [],
         pendingQuestionCount: 0,
         paused: false,
+        startedAt: expect.any(Date),
+        todayCost: expect.any(Number),
       });
     });
   });

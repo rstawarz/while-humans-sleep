@@ -168,7 +168,8 @@ program
 program
   .command("start")
   .description("Start the dispatcher")
-  .action(async () => {
+  .option("--no-tui", "Disable TUI dashboard (plain log output)")
+  .action(async (options: { tui?: boolean }) => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
@@ -249,24 +250,59 @@ program
       }
     }
 
-    const dispatcher = new Dispatcher(config, notifier);
+    const useTui = options.tui !== false && process.stdout.isTTY === true;
 
-    // Handle graceful shutdown (Ctrl+C or kill)
-    // First signal: graceful shutdown (wait for agents)
-    // Second signal: force stop
-    const handleShutdown = async () => {
-      await dispatcher.requestShutdown();
-      if (telegramService) {
-        await telegramService.stop();
-        console.log("  Telegram bot stopped");
-      }
-      process.exit(0);
-    };
+    if (useTui) {
+      // TUI mode: render ink dashboard
+      const { TUILogger } = await import("./tui/tui-logger.js");
+      const { Dashboard } = await import("./tui/Dashboard.js");
+      const React = await import("react");
+      const { render } = await import("ink");
 
-    process.on("SIGINT", handleShutdown);  // Ctrl+C
-    process.on("SIGTERM", handleShutdown); // kill (default signal)
+      const tuiLogger = new TUILogger();
+      const dispatcher = new Dispatcher(config, notifier, undefined, tuiLogger);
 
-    await dispatcher.start();
+      // Start dispatcher in background
+      dispatcher.start().catch((err) => tuiLogger.error(String(err)));
+
+      const { waitUntilExit } = render(
+        React.createElement(Dashboard, {
+          dispatcher,
+          logger: tuiLogger,
+          maxTotal: config.concurrency.maxTotal,
+        })
+      );
+
+      const handleShutdown = async (): Promise<void> => {
+        await dispatcher.requestShutdown();
+        if (telegramService) {
+          await telegramService.stop();
+        }
+        process.exit(0);
+      };
+
+      process.on("SIGINT", handleShutdown);
+      process.on("SIGTERM", handleShutdown);
+
+      await waitUntilExit();
+    } else {
+      // Plain mode: console output
+      const dispatcher = new Dispatcher(config, notifier);
+
+      const handleShutdown = async (): Promise<void> => {
+        await dispatcher.requestShutdown();
+        if (telegramService) {
+          await telegramService.stop();
+          console.log("  Telegram bot stopped");
+        }
+        process.exit(0);
+      };
+
+      process.on("SIGINT", handleShutdown);
+      process.on("SIGTERM", handleShutdown);
+
+      await dispatcher.start();
+    }
   });
 
 program
