@@ -1,5 +1,5 @@
 /**
- * Command Handler - Handles /pause, /resume, /status commands via Telegram
+ * Command Handler - Handles /pause, /resume, /status, /doctor, /retry commands via Telegram
  *
  * Sends SIGUSR1/SIGUSR2 signals to the dispatcher process,
  * matching the same approach used by the CLI commands.
@@ -8,14 +8,22 @@
 import type { Context } from "grammy";
 import type { TelegramHandler } from "./types.js";
 import type { AgentLogEvent } from "../../agent-log.js";
+import type { DoctorCheck } from "../../doctor.js";
 import { getLockInfo, loadState } from "../../state.js";
 import { escapeMarkdownV2 } from "../formatter.js";
 import { getStatusData, getStepDetail, formatDuration } from "../../status.js";
+import { runDoctorChecks } from "../../doctor.js";
+import { loadConfig } from "../../config.js";
+import {
+  retryWorkflow,
+  getErroredWorkflows,
+  findEpicBySourceBead,
+} from "../../workflow.js";
 
 // Re-export formatDuration for backwards compatibility with tests
 export { formatDuration } from "../../status.js";
 
-const COMMANDS = ["/pause", "/resume", "/status"];
+const COMMANDS = ["/pause", "/resume", "/status", "/doctor", "/retry"];
 
 /**
  * Handler for dispatcher control commands via Telegram
@@ -41,6 +49,12 @@ export class CommandHandler implements TelegramHandler {
     }
     if (text.startsWith("/status")) {
       return this.handleStatus(ctx);
+    }
+    if (text.startsWith("/doctor")) {
+      return this.handleDoctor(ctx);
+    }
+    if (text.startsWith("/retry")) {
+      return this.handleRetry(ctx);
     }
 
     return false;
@@ -240,6 +254,152 @@ export class CommandHandler implements TelegramHandler {
     }
 
     await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
+    return true;
+  }
+
+  private async handleDoctor(ctx: Context): Promise<boolean> {
+    try {
+      const config = loadConfig();
+      const checks = await runDoctorChecks(config);
+      const lines: string[] = [];
+
+      lines.push("\\U0001FA7A *WHS Doctor*");
+      lines.push("");
+
+      const icons: Record<DoctorCheck["status"], string> = {
+        pass: "\\u2705",
+        warn: "\\u26A0\\uFE0F",
+        fail: "\\u274C",
+      };
+
+      for (const check of checks) {
+        const icon = icons[check.status];
+        lines.push(
+          `${icon} ${escapeMarkdownV2(check.name)}: ${escapeMarkdownV2(check.message)}`
+        );
+
+        if (check.details && check.details.length > 0) {
+          for (const detail of check.details) {
+            lines.push(`  ${escapeMarkdownV2(detail)}`);
+          }
+        }
+      }
+
+      const warnCount = checks.filter((c) => c.status === "warn").length;
+      const failCount = checks.filter((c) => c.status === "fail").length;
+
+      lines.push("");
+      if (failCount === 0 && warnCount === 0) {
+        lines.push("Result: all checks passed");
+      } else {
+        const parts: string[] = [];
+        if (warnCount > 0)
+          parts.push(
+            `${warnCount} ${warnCount === 1 ? "warning" : "warnings"}`
+          );
+        if (failCount > 0)
+          parts.push(`${failCount} ${failCount === 1 ? "error" : "errors"}`);
+        lines.push(`Result: ${escapeMarkdownV2(parts.join(", "))}`);
+      }
+
+      await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
+    } catch (err) {
+      await ctx.reply(
+        `\\u274C Doctor failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        { parse_mode: "MarkdownV2" }
+      );
+    }
+
+    return true;
+  }
+
+  private async handleRetry(ctx: Context): Promise<boolean> {
+    const text = ctx.message?.text?.trim() || "";
+    const arg = text.replace(/^\/retry\s*/, "").trim();
+
+    if (arg) {
+      // Specific mode: retry a single epic
+      return this.handleRetrySpecific(ctx, arg);
+    }
+
+    // Auto mode: retry all errored workflows
+    return this.handleRetryAll(ctx);
+  }
+
+  private async handleRetrySpecific(
+    ctx: Context,
+    epicIdOrSource: string
+  ): Promise<boolean> {
+    try {
+      let resolvedEpicId = epicIdOrSource;
+      let sourceLabel = "";
+
+      // Try resolving as a source bead ID
+      const epic = findEpicBySourceBead(epicIdOrSource);
+      if (epic) {
+        resolvedEpicId = epic.id;
+        sourceLabel = ` \\(${escapeMarkdownV2(epic.sourceProject + "/" + epicIdOrSource)}\\)`;
+      }
+
+      retryWorkflow(resolvedEpicId);
+
+      await ctx.reply(
+        `\\U0001F504 Retried workflow ${escapeMarkdownV2(resolvedEpicId)}${sourceLabel}\n\nWill pick up on next dispatcher tick\\.`,
+        { parse_mode: "MarkdownV2" }
+      );
+    } catch (err) {
+      await ctx.reply(
+        `\\u274C Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        { parse_mode: "MarkdownV2" }
+      );
+    }
+
+    return true;
+  }
+
+  private async handleRetryAll(ctx: Context): Promise<boolean> {
+    try {
+      const errored = getErroredWorkflows();
+
+      if (errored.length === 0) {
+        await ctx.reply("No errored workflows to retry\\.", {
+          parse_mode: "MarkdownV2",
+        });
+        return true;
+      }
+
+      const results: string[] = [];
+      for (const workflow of errored) {
+        try {
+          retryWorkflow(workflow.epicId);
+          results.push(
+            `\\u2705 ${escapeMarkdownV2(workflow.epicId)} \\(${escapeMarkdownV2(workflow.sourceProject + "/" + workflow.sourceBeadId)}\\)`
+          );
+        } catch (err) {
+          results.push(
+            `\\u274C ${escapeMarkdownV2(workflow.epicId)}: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`
+          );
+        }
+      }
+
+      const lines: string[] = [];
+      lines.push(
+        `\\U0001F504 Retried ${errored.length} workflow\\(s\\):`
+      );
+      for (const r of results) {
+        lines.push(`  ${r}`);
+      }
+      lines.push("");
+      lines.push("Will pick up on next dispatcher tick\\.");
+
+      await ctx.reply(lines.join("\n"), { parse_mode: "MarkdownV2" });
+    } catch (err) {
+      await ctx.reply(
+        `\\u274C Retry failed: ${escapeMarkdownV2(err instanceof Error ? err.message : String(err))}`,
+        { parse_mode: "MarkdownV2" }
+      );
+    }
+
     return true;
   }
 }

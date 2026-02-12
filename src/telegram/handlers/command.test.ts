@@ -1,5 +1,5 @@
 /**
- * Tests for CommandHandler - /pause, /resume, /status via Telegram
+ * Tests for CommandHandler - /pause, /resume, /status, /doctor, /retry via Telegram
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -39,6 +39,13 @@ vi.mock("../../beads/index.js", () => ({
 // Mock workflow
 vi.mock("../../workflow.js", () => ({
   getErroredWorkflows: vi.fn(() => []),
+  retryWorkflow: vi.fn(),
+  findEpicBySourceBead: vi.fn(() => null),
+}));
+
+// Mock doctor
+vi.mock("../../doctor.js", () => ({
+  runDoctorChecks: vi.fn(() => []),
 }));
 
 // Mock metrics
@@ -50,16 +57,20 @@ vi.mock("../../metrics.js", () => ({
 import { CommandHandler, formatDuration } from "./command.js";
 import { getLockInfo, loadState } from "../../state.js";
 import { beads } from "../../beads/index.js";
-import { getErroredWorkflows } from "../../workflow.js";
+import { getErroredWorkflows, retryWorkflow, findEpicBySourceBead } from "../../workflow.js";
 import { getTodayCost, getWorkflowSteps } from "../../metrics.js";
+import { runDoctorChecks } from "../../doctor.js";
 
 const mockGetLockInfo = getLockInfo as ReturnType<typeof vi.fn>;
 const mockLoadState = loadState as ReturnType<typeof vi.fn>;
 const mockListPendingQuestions = beads.listPendingQuestions as ReturnType<typeof vi.fn>;
 const mockParseQuestionData = beads.parseQuestionData as ReturnType<typeof vi.fn>;
 const mockGetErroredWorkflows = getErroredWorkflows as ReturnType<typeof vi.fn>;
+const mockRetryWorkflow = retryWorkflow as ReturnType<typeof vi.fn>;
+const mockFindEpicBySourceBead = findEpicBySourceBead as ReturnType<typeof vi.fn>;
 const mockGetTodayCost = getTodayCost as ReturnType<typeof vi.fn>;
 const mockGetWorkflowSteps = getWorkflowSteps as ReturnType<typeof vi.fn>;
+const mockRunDoctorChecks = runDoctorChecks as ReturnType<typeof vi.fn>;
 
 function createMockContext(text: string): {
   message: { text: string };
@@ -128,6 +139,21 @@ describe("CommandHandler", () => {
 
     it("handles /status command", () => {
       const ctx = createMockContext("/status");
+      expect(handler.canHandle(ctx as any)).toBe(true);
+    });
+
+    it("handles /doctor command", () => {
+      const ctx = createMockContext("/doctor");
+      expect(handler.canHandle(ctx as any)).toBe(true);
+    });
+
+    it("handles /retry command", () => {
+      const ctx = createMockContext("/retry");
+      expect(handler.canHandle(ctx as any)).toBe(true);
+    });
+
+    it("handles /retry with argument", () => {
+      const ctx = createMockContext("/retry orc-abc");
       expect(handler.canHandle(ctx as any)).toBe(true);
     });
 
@@ -455,6 +481,191 @@ describe("CommandHandler", () => {
 
       const replyText = ctx.reply.mock.calls[0][0];
       expect(replyText).toContain("step 1");
+    });
+  });
+
+  describe("/doctor", () => {
+    it("shows all-pass results", async () => {
+      mockRunDoctorChecks.mockResolvedValue([
+        { name: "Beads daemons", status: "pass", message: "all running" },
+        { name: "Daemon errors", status: "pass", message: "no errors" },
+        { name: "Errored workflows", status: "pass", message: "none" },
+      ]);
+
+      const ctx = createMockContext("/doctor");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("WHS Doctor");
+      expect(replyText).toContain("all running");
+      expect(replyText).toContain("no errors");
+      expect(replyText).toContain("all checks passed");
+    });
+
+    it("shows warnings with details", async () => {
+      mockRunDoctorChecks.mockResolvedValue([
+        { name: "Beads daemons", status: "pass", message: "all running" },
+        {
+          name: "Errored workflows",
+          status: "warn",
+          message: "1 errored",
+          details: ["orc-vyo (bridget_ai/bai-zv0.7) — auth"],
+        },
+      ]);
+
+      const ctx = createMockContext("/doctor");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("1 errored");
+      expect(replyText).toContain("orc\\-vyo");
+      expect(replyText).toContain("1 warning");
+    });
+
+    it("shows failures", async () => {
+      mockRunDoctorChecks.mockResolvedValue([
+        {
+          name: "Beads daemons",
+          status: "fail",
+          message: "2 not running",
+          details: ["bridget_ai: not running", "orchestrator: not running"],
+        },
+      ]);
+
+      const ctx = createMockContext("/doctor");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("2 not running");
+      expect(replyText).toContain("1 error");
+    });
+
+    it("handles doctor errors gracefully", async () => {
+      mockRunDoctorChecks.mockRejectedValue(new Error("config not found"));
+
+      const ctx = createMockContext("/doctor");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("Doctor failed");
+      expect(replyText).toContain("config not found");
+    });
+  });
+
+  describe("/retry", () => {
+    it("auto-retries all errored workflows", async () => {
+      mockGetErroredWorkflows.mockReturnValue([
+        {
+          epicId: "orc-err1",
+          errorType: "auth",
+          sourceProject: "bridget_ai",
+          sourceBeadId: "bai-zv0.7",
+        },
+        {
+          epicId: "orc-err2",
+          errorType: "auth",
+          sourceProject: "bridget_ai",
+          sourceBeadId: "bai-zv0.8",
+        },
+      ]);
+
+      const ctx = createMockContext("/retry");
+      await handler.handle(ctx as any);
+
+      expect(mockRetryWorkflow).toHaveBeenCalledWith("orc-err1");
+      expect(mockRetryWorkflow).toHaveBeenCalledWith("orc-err2");
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("Retried 2 workflow");
+      expect(replyText).toContain("orc\\-err1");
+      expect(replyText).toContain("orc\\-err2");
+      expect(replyText).toContain("next dispatcher tick");
+    });
+
+    it("reports when no errored workflows found", async () => {
+      mockGetErroredWorkflows.mockReturnValue([]);
+
+      const ctx = createMockContext("/retry");
+      await handler.handle(ctx as any);
+
+      expect(mockRetryWorkflow).not.toHaveBeenCalled();
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("No errored workflows to retry");
+    });
+
+    it("retries specific epic by ID", async () => {
+      mockFindEpicBySourceBead.mockReturnValue(null);
+
+      const ctx = createMockContext("/retry orc-vyo");
+      await handler.handle(ctx as any);
+
+      expect(mockRetryWorkflow).toHaveBeenCalledWith("orc-vyo");
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("Retried workflow orc\\-vyo");
+    });
+
+    it("resolves source bead ID to epic", async () => {
+      mockFindEpicBySourceBead.mockReturnValue({
+        id: "orc-vyo",
+        sourceProject: "bridget_ai",
+        sourceBeadId: "bai-zv0.7",
+        title: "bridget_ai:bai-zv0.7",
+        status: "blocked",
+        createdAt: new Date(),
+      });
+
+      const ctx = createMockContext("/retry bai-zv0.7");
+      await handler.handle(ctx as any);
+
+      expect(mockRetryWorkflow).toHaveBeenCalledWith("orc-vyo");
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("orc\\-vyo");
+      expect(replyText).toContain("bridget\\_ai/bai\\-zv0\\.7");
+    });
+
+    it("reports retry failures gracefully", async () => {
+      mockFindEpicBySourceBead.mockReturnValue(null);
+      mockRetryWorkflow.mockImplementation(() => {
+        throw new Error("bead not found");
+      });
+
+      const ctx = createMockContext("/retry orc-bad");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("Retry failed");
+      expect(replyText).toContain("bead not found");
+    });
+
+    it("reports individual retry failures in auto mode", async () => {
+      mockGetErroredWorkflows.mockReturnValue([
+        {
+          epicId: "orc-ok",
+          errorType: "auth",
+          sourceProject: "bridget_ai",
+          sourceBeadId: "bai-1",
+        },
+        {
+          epicId: "orc-bad",
+          errorType: "auth",
+          sourceProject: "bridget_ai",
+          sourceBeadId: "bai-2",
+        },
+      ]);
+      mockRetryWorkflow.mockImplementation((epicId: string) => {
+        if (epicId === "orc-bad") throw new Error("bead not found");
+      });
+
+      const ctx = createMockContext("/retry");
+      await handler.handle(ctx as any);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain("orc\\-ok");
+      expect(replyText).toContain("orc\\-bad");
+      expect(replyText).toContain("bead not found");
     });
   });
 });
