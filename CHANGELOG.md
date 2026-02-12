@@ -5,6 +5,12 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-02-11
+
+### Fixed
+- **Planner agent wrote code instead of creating tasks**: Planner received the same prompt template as implementation agents (including "push to this branch" and PR handoff options), causing it to implement features instead of planning. Now skips worktree/branch framing, restricts handoffs to DONE/BLOCKED, adds explicit "do NOT write code" instructions, and injects the project epic ID
+- **Worktree cleanup missed GitHub-merged branches**: `cleanupMergedWorktrees` relied on worktrunk's `mainState` which compares against the local main ref. Branches merged via GitHub PR appeared as "ahead" instead of "integrated". Now fetches origin before checking
+
 ## [0.12.0] - 2026-02-11
 
 ### Added
