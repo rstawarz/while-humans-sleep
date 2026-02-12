@@ -1073,8 +1073,9 @@ export class Dispatcher {
       taskTitle: work.workItem.title,
       taskDescription: work.workItem.description,
       workflowContext,
-      agentRole: this.getAgentRole(work.agent),
+      agentRole: this.getAgentRole(work.agent, work.workItem),
       branchName: sourceInfo?.beadId,
+      agent: work.agent,
     });
 
     await this.notifier.notifyProgress(work, `Running ${work.agent} agent`);
@@ -1447,16 +1448,44 @@ export class Dispatcher {
   /**
    * Gets the role description for an agent
    */
-  private getAgentRole(agent: string): string {
+  private getAgentRole(agent: string, workItem?: WorkItem): string {
+    if (agent === "planner") {
+      return this.getPlannerRole(workItem);
+    }
+
     const roles: Record<string, string> = {
       implementation: "You are a senior software engineer. Implement the requested changes, create a PR when ready.",
       quality_review: "You are a code reviewer. Review the PR, check CI status, and decide if it's ready to merge.",
       release_manager: "You are a release manager. Merge approved PRs and handle any merge conflicts.",
       ux_specialist: "You are a UX specialist. Implement UI/UX changes following design best practices.",
       architect: "You are a software architect. Make technical decisions and unblock complex issues.",
-      planner: "You are a technical planner. Break down the task into implementable subtasks.",
     };
     return roles[agent] || `You are the ${agent} agent.`;
+  }
+
+  /**
+   * Builds the planner role with the project epic ID injected
+   */
+  private getPlannerRole(workItem?: WorkItem): string {
+    // Extract epic ID from the planning task's labels (epic:<id>)
+    const epicLabel = workItem?.labels?.find((l) => l.startsWith("epic:"));
+    const epicId = epicLabel?.replace("epic:", "") || "<EPIC_ID>";
+
+    return [
+      "You are a technical planner. Your ONLY job is to analyze the codebase, ask clarifying questions, and create implementation tasks in beads.",
+      "",
+      "Do NOT write code, create PRs, or make commits. Do NOT implement anything.",
+      "",
+      "Your workflow:",
+      "1. Read CLAUDE.md and explore the codebase to understand the project",
+      "2. Ask clarifying questions using AskUserQuestion if anything is unclear",
+      "3. Present your implementation plan and ask for approval",
+      `4. After approval, create tasks under epic ${epicId}:`,
+      `   bd create "Task title" -t task --parent ${epicId} --description "Description with acceptance criteria"`,
+      "5. Set up dependencies between tasks:",
+      "   bd dep add <TASK_B_ID> <TASK_A_ID>",
+      "6. Hand off with next_agent: DONE",
+    ].join("\n");
   }
 
   private sleep(ms: number): Promise<void> {

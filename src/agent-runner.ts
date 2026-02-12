@@ -177,13 +177,15 @@ export function formatAgentPrompt(params: {
   workflowContext?: string;
   agentRole: string;
   branchName?: string;
+  agent?: string;
 }): string {
   const lines: string[] = [];
+  const isPlanner = params.agent === "planner";
 
   lines.push(`# Task: ${params.taskTitle}`);
   lines.push("");
 
-  if (params.branchName) {
+  if (params.branchName && !isPlanner) {
     lines.push("## Environment");
     lines.push(`You are working in an isolated worktree on branch \`${params.branchName}\`.`);
     lines.push("Do NOT rename, switch, or create new branches. Push your work to this branch.");
@@ -224,14 +226,21 @@ export function formatAgentPrompt(params: {
   lines.push("  <What the next agent needs to know>");
   lines.push("```");
   lines.push("");
-  lines.push("Valid next_agent values:");
-  lines.push("- implementation - for code changes");
-  lines.push("- quality_review - for PR review");
-  lines.push("- release_manager - for merging");
-  lines.push("- ux_specialist - for UI/UX work");
-  lines.push("- architect - for complex decisions");
-  lines.push("- DONE - when task is complete");
-  lines.push("- BLOCKED - when human intervention needed");
+
+  if (isPlanner) {
+    lines.push("Valid next_agent values:");
+    lines.push("- DONE - when planning is complete and tasks are created");
+    lines.push("- BLOCKED - when human intervention needed");
+  } else {
+    lines.push("Valid next_agent values:");
+    lines.push("- implementation - for code changes");
+    lines.push("- quality_review - for PR review");
+    lines.push("- release_manager - for merging");
+    lines.push("- ux_specialist - for UI/UX work");
+    lines.push("- architect - for complex decisions");
+    lines.push("- DONE - when task is complete");
+    lines.push("- BLOCKED - when human intervention needed");
+  }
 
   return lines.join("\n");
 }
