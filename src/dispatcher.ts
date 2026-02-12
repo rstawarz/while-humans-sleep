@@ -56,7 +56,7 @@ import {
   retryWorkflow,
 } from "./workflow.js";
 import { execSync } from "child_process";
-import { ensureWorktree, removeWorktree } from "./worktree.js";
+import { ensureWorktree, removeWorktree, cleanupWorktrees } from "./worktree.js";
 import { formatAgentPrompt, type AgentRunner } from "./agent-runner.js";
 import { createAgentRunner } from "./agent-runner-factory.js";
 import { getHandoff, isValidAgent } from "./handoff.js";
@@ -65,14 +65,18 @@ import {
   recordWorkflowComplete,
   recordStepStart,
   recordStepComplete,
+  getTodayCost,
 } from "./metrics.js";
 import { logAgentEvent, cleanAllLogs } from "./agent-log.js";
 import type { Bead } from "./beads/types.js";
+import type { Logger } from "./logger.js";
+import { ConsoleLogger } from "./logger.js";
 
 export class Dispatcher {
   private projects: Map<string, Project>;
   private state: DispatcherState;
   private notifier: Notifier;
+  private logger: Logger;
   private lastOperation: string = "idle";
   private agentRunner: AgentRunner;
   private running: boolean = false;
@@ -81,6 +85,7 @@ export class Dispatcher {
   private tickCount: number = 0;
   private runningAgents: Map<string, Promise<void>> = new Map();
   private shutdownResolve: (() => void) | null = null;
+  private readonly startedAt: Date = new Date();
 
   private readonly config: Config;
 
@@ -93,10 +98,11 @@ export class Dispatcher {
   // Max agent turns — if agent uses this many, it likely hit the limit
   private readonly MAX_AGENT_TURNS = 500;
 
-  constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner) {
+  constructor(config: Config, notifier: Notifier, agentRunner?: AgentRunner, logger?: Logger) {
     this.config = config;
     this.projects = new Map(config.projects.map((p) => [p.name, p]));
     this.notifier = notifier;
+    this.logger = logger ?? new ConsoleLogger();
     this.agentRunner = agentRunner ?? createAgentRunner(config.runnerType);
 
     // Load persisted state for crash recovery
@@ -107,41 +113,46 @@ export class Dispatcher {
     // Check if another dispatcher is already running
     const existingLock = getLockInfo();
     if (existingLock) {
-      console.error("❌ Another dispatcher is already running!");
-      console.error(`   PID: ${existingLock.pid}`);
-      console.error(`   Started: ${existingLock.startedAt}`);
-      console.error("");
-      console.error("Use `whs status` to check its status, or kill the process manually.");
+      this.logger.error("❌ Another dispatcher is already running!");
+      this.logger.error(`   PID: ${existingLock.pid}`);
+      this.logger.error(`   Started: ${existingLock.startedAt}`);
+      this.logger.error("");
+      this.logger.error("Use `whs status` to check its status, or kill the process manually.");
       throw new Error("Dispatcher already running");
     }
 
     // Acquire lock
     if (!acquireLock()) {
-      console.error("❌ Failed to acquire dispatcher lock");
+      this.logger.error("❌ Failed to acquire dispatcher lock");
       throw new Error("Failed to acquire lock");
     }
 
-    this.setupOutputInterceptor();
+    // Only intercept raw stdout/stderr when using ConsoleLogger.
+    // In TUI mode, ink owns stdout for rendering — intercepting it
+    // breaks ink's cursor management and causes duplicate panels.
+    if (this.logger instanceof ConsoleLogger) {
+      this.setupOutputInterceptor();
+    }
 
     // Clean up agent logs from previous session
     cleanAllLogs();
 
-    console.log("🌙 While Humans Sleep - Starting dispatcher");
-    console.log(`   PID: ${process.pid}`);
-    console.log(`   Projects: ${[...this.projects.keys()].join(", ") || "(none)"}`);
-    console.log(`   Max concurrent: ${this.config.concurrency.maxTotal}`);
-    console.log(`   Orchestrator: ${this.config.orchestratorPath}`);
+    this.logger.log("🌙 While Humans Sleep - Starting dispatcher");
+    this.logger.log(`   PID: ${process.pid}`);
+    this.logger.log(`   Projects: ${[...this.projects.keys()].join(", ") || "(none)"}`);
+    this.logger.log(`   Max concurrent: ${this.config.concurrency.maxTotal}`);
+    this.logger.log(`   Orchestrator: ${this.config.orchestratorPath}`);
 
     if (this.state.activeWork.size > 0) {
-      console.log(`   Recovering: ${this.state.activeWork.size} active work items`);
+      this.logger.log(`   Recovering: ${this.state.activeWork.size} active work items`);
     }
     // Check for pending questions in orchestrator beads
     const orchestratorPath = expandPath(this.config.orchestratorPath);
     const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
     if (pendingQuestions.length > 0) {
-      console.log(`   Pending questions: ${pendingQuestions.length}`);
+      this.logger.log(`   Pending questions: ${pendingQuestions.length}`);
     }
-    console.log("");
+    this.logger.log("");
 
     // Verify agent auth/connectivity before starting the tick loop
     try {
@@ -150,23 +161,23 @@ export class Dispatcher {
       releaseLock();
       const message = err instanceof Error ? err.message : String(err);
       if (message.toLowerCase().includes("auth")) {
-        console.error("\n" + "=".repeat(60));
-        console.error("🔐 PREFLIGHT FAILED — AUTHENTICATION ERROR");
-        console.error("=".repeat(60));
-        console.error(`\nError: ${message}`);
-        console.error("\nPlease fix authentication before starting:");
-        console.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
-        console.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
-        console.error("=".repeat(60) + "\n");
+        this.logger.error("\n" + "=".repeat(60));
+        this.logger.error("🔐 PREFLIGHT FAILED — AUTHENTICATION ERROR");
+        this.logger.error("=".repeat(60));
+        this.logger.error(`\nError: ${message}`);
+        this.logger.error("\nPlease fix authentication before starting:");
+        this.logger.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
+        this.logger.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
+        this.logger.error("=".repeat(60) + "\n");
       } else {
-        console.error(`\n❌ Preflight check failed: ${message}`);
-        console.error("   The dispatcher cannot start without a working agent connection.\n");
+        this.logger.error(`\n❌ Preflight check failed: ${message}`);
+        this.logger.error("   The dispatcher cannot start without a working agent connection.\n");
       }
       throw err;
     }
 
     if (this.state.paused) {
-      console.log("⚠️  Dispatcher is PAUSED (from previous session). Run 'whs resume' to start processing.");
+      this.logger.log("⚠️  Dispatcher is PAUSED (from previous session). Run 'whs resume' to start processing.");
     }
 
     // Recover any workflows that were marked errored (e.g., auth failures)
@@ -190,7 +201,7 @@ export class Dispatcher {
           this.recoverErroredWorkflows();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`❌ Preflight check failed after resume: ${message}`);
+          this.logger.error(`❌ Preflight check failed after resume: ${message}`);
           this.pause();
           await this.notifier.notifyRateLimit(
             new Error(`Preflight check failed: ${message}`)
@@ -205,12 +216,13 @@ export class Dispatcher {
           await this.tick();
           this.tickCount++;
 
-          // Periodic daemon health check
+          // Periodic maintenance (every ~5 min)
           if (this.tickCount % this.DAEMON_HEALTH_CHECK_INTERVAL === 0) {
             await this.checkDaemonHealth();
+            this.cleanupMergedWorktrees();
           }
         } catch (err) {
-          console.error("Error in dispatcher tick:", err);
+          this.logger.error(`Error in dispatcher tick: ${err}`);
         }
       }
       await this.sleep(5000);
@@ -223,8 +235,8 @@ export class Dispatcher {
   async requestShutdown(): Promise<void> {
     if (this.shuttingDown) {
       // Already shutting down, force stop
-      console.log("\n⚠️  Force stopping (agents may lose work)...");
-      this.forceStop();
+      this.logger.log("\n⚠️  Force stopping (agents may lose work)...");
+      this.stopDispatcher(true);
       return;
     }
 
@@ -232,52 +244,58 @@ export class Dispatcher {
     const activeCount = this.runningAgents.size;
 
     if (activeCount === 0) {
-      console.log("\n🛑 No active agents, stopping immediately...");
-      this.forceStop();
+      this.logger.log("\n🛑 No active agents, stopping immediately...");
+      this.stopDispatcher(false);
       return;
     }
 
-    console.log(`\n🛑 Graceful shutdown requested...`);
-    console.log(`   Waiting for ${activeCount} active agent(s) to complete.`);
-    console.log(`   Press Ctrl+C again to force stop.\n`);
+    this.logger.log(`\n🛑 Graceful shutdown requested...`);
+    this.logger.log(`   Waiting for ${activeCount} active agent(s) to complete.`);
+    this.logger.log(`   Press Ctrl+C again to force stop.\n`);
 
     // Wait for all running agents with timeout
     const agentPromises = [...this.runningAgents.values()];
-    const timeoutPromise = new Promise<void>((resolve) => {
+    const agentsFinished = Promise.all(agentPromises).then(() => "agents-done" as const);
+    const timeoutPromise = new Promise<"timeout">((resolve) => {
       setTimeout(() => {
-        console.log("\n⏰ Graceful shutdown timeout reached.");
-        resolve();
+        this.logger.log("\n⏰ Graceful shutdown timeout reached.");
+        resolve("timeout");
       }, this.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
     });
 
-    // Create a promise that resolves when shutdown is forced
-    const forcePromise = new Promise<void>((resolve) => {
-      this.shutdownResolve = resolve;
+    // Create a promise that resolves when shutdown is forced (second Ctrl+C)
+    const forcePromise = new Promise<"forced">((resolve) => {
+      this.shutdownResolve = () => resolve("forced");
     });
 
-    await Promise.race([
-      Promise.all(agentPromises),
+    const reason = await Promise.race([
+      agentsFinished,
       timeoutPromise,
       forcePromise,
     ]);
 
-    this.forceStop();
+    if (reason === "agents-done") {
+      this.logger.log("\n✅ All agents completed. Shutting down.");
+    }
+
+    // Only abort agents if they didn't finish gracefully
+    this.stopDispatcher(reason !== "agents-done");
   }
 
   /**
-   * Force stop - immediate shutdown without waiting
+   * Stop the dispatcher, optionally aborting running agents.
    */
-  private forceStop(): void {
-    console.log("🛑 Stopping dispatcher...");
+  private stopDispatcher(abortAgents: boolean): void {
+    this.logger.log("🛑 Stopping dispatcher...");
     this.running = false;
 
     // Remove signal handlers
     process.removeAllListeners("SIGUSR1");
     process.removeAllListeners("SIGUSR2");
 
-    // Abort any running agents
-    if (this.runningAgents.size > 0) {
-      console.log(`   Aborting ${this.runningAgents.size} running agent(s)...`);
+    // Only abort agents if they didn't finish gracefully
+    if (abortAgents && this.runningAgents.size > 0) {
+      this.logger.log(`   Aborting ${this.runningAgents.size} running agent(s)...`);
       this.agentRunner.abort();
     }
 
@@ -311,13 +329,13 @@ export class Dispatcher {
 
   pause(): void {
     this.state = setPaused(this.state, true);
-    console.log("⏸️  Dispatcher paused");
+    this.logger.log("⏸️  Dispatcher paused");
   }
 
   resume(): void {
     this.preflightNeeded = true;
     this.state = setPaused(this.state, false);
-    console.log("▶️  Dispatcher resumed (preflight pending)");
+    this.logger.log("▶️  Dispatcher resumed (preflight pending)");
   }
 
   /**
@@ -367,9 +385,10 @@ export class Dispatcher {
           const text = typeof chunk === "string" ? chunk : chunk.toString();
           const trimmed = text.trim();
           if (trimmed.length > 0) {
-            origConsoleWarn(
-              `[WHS:INTERCEPTED] ${stream}: "${trimmed}" (during: ${self.lastOperation})`
-            );
+            // Use origStderrWrite directly to avoid recursion — origConsoleWarn
+            // would write to the wrapped stderr, causing infinite recursion.
+            const msg = `[WHS:INTERCEPTED] ${stream}: "${trimmed}" (during: ${self.lastOperation})\n`;
+            origStderrWrite.call(process.stderr, msg);
           }
         }
         return origWrite.call(process[stream], chunk, encodingOrCb, cb);
@@ -388,7 +407,7 @@ export class Dispatcher {
    * first tick. Throws on failure — caller decides how to handle it.
    */
   async runPreflightCheck(): Promise<void> {
-    console.log("🔍 Running preflight check...");
+    this.logger.log("🔍 Running preflight check...");
 
     const orchestratorPath = expandPath(this.config.orchestratorPath);
 
@@ -406,7 +425,7 @@ export class Dispatcher {
       throw new Error(`Preflight check failed: ${result.error || "agent returned unsuccessful result"}`);
     }
 
-    console.log("✅ Preflight check passed");
+    this.logger.log("✅ Preflight check passed");
   }
 
   /**
@@ -419,13 +438,13 @@ export class Dispatcher {
     const errored = getErroredWorkflows();
     if (errored.length === 0) return;
 
-    console.log(`🔄 Recovering ${errored.length} errored workflow(s)...`);
+    this.logger.log(`🔄 Recovering ${errored.length} errored workflow(s)...`);
     for (const workflow of errored) {
       try {
         retryWorkflow(workflow.epicId);
-        console.log(`   ✓ ${workflow.epicId} (${workflow.sourceProject}/${workflow.sourceBeadId}) — ${workflow.errorType}`);
+        this.logger.log(`   ✓ ${workflow.epicId} (${workflow.sourceProject}/${workflow.sourceBeadId}) — ${workflow.errorType}`);
       } catch (err) {
-        console.error(`   ✗ Failed to recover ${workflow.epicId}: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`   ✗ Failed to recover ${workflow.epicId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -440,12 +459,12 @@ export class Dispatcher {
     for (const project of this.projects.values()) {
       const projectPath = expandPath(project.repoPath);
       if (!beads.isDaemonRunning(projectPath)) {
-        console.log(`🔄 Restarting beads daemon for ${project.name}...`);
+        this.logger.log(`🔄 Restarting beads daemon for ${project.name}...`);
         try {
           beads.ensureDaemonWithSyncBranch(projectPath, "beads-sync");
           restartedCount++;
         } catch (err) {
-          console.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
+          this.logger.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
@@ -453,17 +472,34 @@ export class Dispatcher {
     // Also check orchestrator
     const orchestratorPath = expandPath(this.config.orchestratorPath);
     if (!beads.isDaemonRunning(orchestratorPath)) {
-      console.log("🔄 Restarting beads daemon for orchestrator...");
+      this.logger.log("🔄 Restarting beads daemon for orchestrator...");
       try {
         beads.ensureDaemonWithSyncBranch(orchestratorPath, "beads-sync");
         restartedCount++;
       } catch (err) {
-        console.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`   Failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     if (restartedCount > 0) {
-      console.log(`   Restarted ${restartedCount} daemon(s)`);
+      this.logger.log(`   Restarted ${restartedCount} daemon(s)`);
+    }
+  }
+
+  /**
+   * Clean up worktrees whose branches have been merged into main.
+   * Runs periodically alongside daemon health checks.
+   */
+  private cleanupMergedWorktrees(): void {
+    for (const project of this.projects.values()) {
+      try {
+        const removed = cleanupWorktrees(project.name);
+        for (const branch of removed) {
+          this.logger.log(`🧹 Cleaned up merged worktree: ${project.name}/${branch}`);
+        }
+      } catch {
+        // Non-critical — don't log noise if wt isn't available
+      }
     }
   }
 
@@ -504,7 +540,7 @@ export class Dispatcher {
       try {
         markStepInProgress(step.id);
       } catch (err) {
-        console.error(`Failed to mark step ${step.id} in progress:`, err);
+        this.logger.error(`Failed to mark step ${step.id} in progress: ${err}`);
         continue;
       }
 
@@ -514,9 +550,9 @@ export class Dispatcher {
           // Dispatch failed — use circuit breaker to reset or block
           const wasReset = resetStepForRetry(step.id, this.MAX_DISPATCH_ATTEMPTS);
           if (wasReset) {
-            console.warn(`⚠️  Dispatch failed for ${step.id}, will retry (${err instanceof Error ? err.message : String(err)})`);
+            this.logger.warn(`⚠️  Dispatch failed for ${step.id}, will retry (${err instanceof Error ? err.message : String(err)})`);
           } else {
-            console.error(`🚫 Dispatch failed for ${step.id} after max attempts, marking blocked`);
+            this.logger.error(`🚫 Dispatch failed for ${step.id} after max attempts, marking blocked`);
           }
           // Clean up activeWork if it was added
           if (this.state.activeWork.has(step.id)) {
@@ -555,7 +591,7 @@ export class Dispatcher {
 
         const workflowPromise = this.startNewWorkflow(next)
           .catch((err) => {
-            console.error(`Failed to start workflow for ${next.id}:`, err);
+            this.logger.error(`Failed to start workflow for ${next.id}: ${err}`);
           })
           .finally(() => {
             this.runningAgents.delete(next.id);
@@ -580,16 +616,16 @@ export class Dispatcher {
   private reconcileActiveWork(): void {
     for (const [id, work] of this.state.activeWork) {
       if (!this.runningAgents.has(id)) {
-        console.warn(`🧟 Zombie detected: ${work.workItem.project}/${id} (in activeWork but no running agent)`);
+        this.logger.warn(`🧟 Zombie detected: ${work.workItem.project}/${id} (in activeWork but no running agent)`);
         this.state = removeActiveWork(this.state, id);
 
         // Try to reset the step for retry (with circuit breaker)
         if (work.workflowStepId) {
           const wasReset = resetStepForRetry(work.workflowStepId, this.MAX_DISPATCH_ATTEMPTS);
           if (wasReset) {
-            console.log(`   Reset step ${work.workflowStepId} to open for retry`);
+            this.logger.log(`   Reset step ${work.workflowStepId} to open for retry`);
           } else {
-            console.log(`   Step ${work.workflowStepId} hit max dispatch attempts, marked blocked`);
+            this.logger.log(`   Step ${work.workflowStepId} hit max dispatch attempts, marked blocked`);
           }
         }
       }
@@ -621,7 +657,7 @@ export class Dispatcher {
         // Resolve the project's repo path so gh commands run in the right repo
         const projectConfig = this.projects.get(step.project);
         if (!projectConfig) {
-          console.warn(`Cannot resolve project "${step.project}" for CI check on PR #${step.prNumber}`);
+          this.logger.warn(`Cannot resolve project "${step.project}" for CI check on PR #${step.prNumber}`);
           continue;
         }
         const repoPath = expandPath(projectConfig.repoPath);
@@ -630,7 +666,7 @@ export class Dispatcher {
         // CI if the PR can't merge
         const mergeability = this.getPRMergeability(step.prNumber, repoPath);
         if (mergeability === "CONFLICTING") {
-          console.log(`⚠️  PR #${step.prNumber} has merge conflicts`);
+          this.logger.log(`⚠️  PR #${step.prNumber} has merge conflicts`);
           updateStepCIStatus(step.id, "failed", step.retryCount);
           completeStep(step.id, "merge_conflicts");
           createNextStep(
@@ -639,7 +675,7 @@ export class Dispatcher {
             `PR #${step.prNumber} has merge conflicts with the base branch. Resolve the conflicts and push updates.`,
             { pr_number: step.prNumber, ci_status: "failed" }
           );
-          console.log(`   Created implementation step to resolve merge conflicts`);
+          this.logger.log(`   Created implementation step to resolve merge conflicts`);
           continue;
         }
 
@@ -651,14 +687,14 @@ export class Dispatcher {
         }
 
         if (ciStatus === "passed") {
-          console.log(`✅ CI passed for PR #${step.prNumber}`);
+          this.logger.log(`✅ CI passed for PR #${step.prNumber}`);
 
           // First CI pass for a quality_review step → redirect to implementation for PR feedback
           if (
             step.agent === "quality_review" &&
             !epicHasLabel(step.epicId, "pr-feedback:addressed")
           ) {
-            console.log(`   📝 Redirecting to implementation to address PR feedback`);
+            this.logger.log(`   📝 Redirecting to implementation to address PR feedback`);
             updateStepCIStatus(step.id, "passed", step.retryCount);
             completeStep(step.id, "Redirected to implementation for PR feedback review");
             createNextStep(
@@ -677,11 +713,11 @@ export class Dispatcher {
         }
 
         if (ciStatus === "failed") {
-          console.log(`❌ CI failed for PR #${step.prNumber} (attempt ${step.retryCount + 1}/${this.MAX_CI_RETRIES})`);
+          this.logger.log(`❌ CI failed for PR #${step.prNumber} (attempt ${step.retryCount + 1}/${this.MAX_CI_RETRIES})`);
 
           // Check retry limit
           if (step.retryCount + 1 >= this.MAX_CI_RETRIES) {
-            console.log(`🚫 Max CI retries reached for PR #${step.prNumber}, marking as BLOCKED`);
+            this.logger.log(`🚫 Max CI retries reached for PR #${step.prNumber}, marking as BLOCKED`);
             updateStepCIStatus(step.id, "failed", step.retryCount);
 
             // Mark the workflow as blocked
@@ -728,10 +764,10 @@ export class Dispatcher {
             { pr_number: step.prNumber, ci_status: "failed" }
           );
 
-          console.log(`   Created implementation step to fix CI failures`);
+          this.logger.log(`   Created implementation step to fix CI failures`);
         }
       } catch (err) {
-        console.error(`Failed to check CI for PR #${step.prNumber}:`, err);
+        this.logger.error(`Failed to check CI for PR #${step.prNumber}: ${err}`);
       }
     }
   }
@@ -806,7 +842,7 @@ export class Dispatcher {
         const epicId = step.epicId;
         const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
         if (!sourceInfo) {
-          console.warn(`Cannot resolve project for step ${step.id} (epic: ${epicId})`);
+          this.logger.warn(`Cannot resolve project for step ${step.id} (epic: ${epicId})`);
           return [];
         }
         return [{
@@ -857,7 +893,7 @@ export class Dispatcher {
         }
       } catch (err) {
         // Project beads may not be initialized
-        console.warn(`Failed to poll ${name}: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.warn(`Failed to poll ${name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -888,7 +924,7 @@ export class Dispatcher {
    */
   private async startNewWorkflow(item: WorkItem): Promise<void> {
     this.lastOperation = `startNewWorkflow:${item.project}/${item.id}`;
-    console.log(`📋 Starting workflow: ${item.project}/${item.id} - ${item.title}`);
+    this.logger.log(`📋 Starting workflow: ${item.project}/${item.id} - ${item.title}`);
 
     const project = this.projects.get(item.project);
     if (!project) {
@@ -900,7 +936,7 @@ export class Dispatcher {
 
     // 2. Create workflow epic and first step
     const { epicId, stepId } = await startWorkflow(item.project, item, firstAgent);
-    console.log(`   Created workflow ${epicId}, step ${stepId}`);
+    this.logger.log(`   Created workflow ${epicId}, step ${stepId}`);
 
     // Record metrics
     recordWorkflowStart(epicId, item.project, item.id);
@@ -910,7 +946,7 @@ export class Dispatcher {
     const worktreePath = ensureWorktree(item.project, item.id, {
       baseBranch: project.baseBranch,
     });
-    console.log(`   Worktree: ${worktreePath}`);
+    this.logger.log(`   Worktree: ${worktreePath}`);
 
     // 4. Track as active work
     const activeWork: ActiveWork = {
@@ -937,20 +973,20 @@ export class Dispatcher {
     // Get the parent epic first, then extract source info from it
     const epic = getWorkflowEpic(step.id);
     if (!epic) {
-      console.error(`Cannot find workflow epic for step ${step.id}`);
+      this.logger.error(`Cannot find workflow epic for step ${step.id}`);
       return;
     }
 
     // Get source bead info from the workflow epic (not the step)
     const sourceInfo = getSourceBeadInfo(epic.id);
     if (!sourceInfo) {
-      console.error(`Cannot find source labels on epic ${epic.id}`);
+      this.logger.error(`Cannot find source labels on epic ${epic.id}`);
       return;
     }
 
     const project = this.projects.get(sourceInfo.project);
     if (!project) {
-      console.error(`Project not found: ${sourceInfo.project}`);
+      this.logger.error(`Project not found: ${sourceInfo.project}`);
       return;
     }
 
@@ -961,9 +997,9 @@ export class Dispatcher {
     // Check if this step has resume info (was blocked by a question that's now answered)
     const resumeInfo = getStepResumeInfo(step.id);
     if (resumeInfo) {
-      console.log(`🔄 Resuming ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle} (answer provided)`);
+      this.logger.log(`🔄 Resuming ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle} (answer provided)`);
     } else {
-      console.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle}`);
+      this.logger.log(`🔄 Dispatching ${agent} for ${sourceInfo.project}/${sourceInfo.beadId} — ${epicTitle}`);
     }
 
     // Use worktree from resume info if available, otherwise ensure it exists
@@ -1078,7 +1114,7 @@ export class Dispatcher {
 
       // Detect turn limit hit — but honor valid handoffs even at the limit
       if (result.turns >= this.MAX_AGENT_TURNS && handoff.next_agent === "BLOCKED") {
-        console.warn(
+        this.logger.warn(
           `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) with no valid handoff — marking BLOCKED`
         );
         await this.notifier.notifyProgress(
@@ -1086,7 +1122,7 @@ export class Dispatcher {
           `Agent hit turn limit (${result.turns} turns) — needs human intervention`
         );
       } else if (result.turns >= this.MAX_AGENT_TURNS) {
-        console.log(
+        this.logger.log(
           `ℹ️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) but produced valid handoff → ${handoff.next_agent}`
         );
       }
@@ -1157,7 +1193,7 @@ export class Dispatcher {
 
       // Detect turn limit hit — but honor valid handoffs even at the limit
       if (result.turns >= this.MAX_AGENT_TURNS && handoff.next_agent === "BLOCKED") {
-        console.warn(
+        this.logger.warn(
           `⚠️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) with no valid handoff — marking BLOCKED`
         );
         await this.notifier.notifyProgress(
@@ -1165,7 +1201,7 @@ export class Dispatcher {
           `Agent hit turn limit (${result.turns} turns) — needs human intervention`
         );
       } else if (result.turns >= this.MAX_AGENT_TURNS) {
-        console.log(
+        this.logger.log(
           `ℹ️ Agent ${work.agent} hit turn limit (${result.turns}/${this.MAX_AGENT_TURNS}) but produced valid handoff → ${handoff.next_agent}`
         );
       }
@@ -1222,7 +1258,7 @@ export class Dispatcher {
     this.state = removeActiveWork(this.state, work.workItem.id);
 
     await this.notifier.notifyQuestion(questionBead.id, questionData);
-    console.log(`❓ Question pending: ${questionBead.id}`);
+    this.logger.log(`❓ Question pending: ${questionBead.id}`);
   }
 
   /**
@@ -1234,7 +1270,7 @@ export class Dispatcher {
     stepCost: number
   ): Promise<void> {
     this.lastOperation = `processHandoff:${work.agent}->${handoff.next_agent}:${work.workItem.project}/${work.workItem.id}`;
-    console.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
+    this.logger.log(`🔀 Handoff: ${work.agent} → ${handoff.next_agent}`);
 
     // Log step end
     logAgentEvent(work.workflowStepId, { type: "end", agent: work.agent, outcome: handoff.next_agent, cost: stepCost });
@@ -1265,9 +1301,9 @@ export class Dispatcher {
         pr_number: handoff.pr_number,
         ci_status: handoff.ci_status as "pending" | "passed" | "failed" | undefined,
       });
-      console.log(`   Next step created for ${handoff.next_agent}`);
+      this.logger.log(`   Next step created for ${handoff.next_agent}`);
     } else {
-      console.error(`Invalid next agent: ${handoff.next_agent}, marking blocked`);
+      this.logger.error(`Invalid next agent: ${handoff.next_agent}, marking blocked`);
       await this.markWorkflowBlocked(work, `Invalid agent: ${handoff.next_agent}`);
     }
   }
@@ -1282,7 +1318,7 @@ export class Dispatcher {
     // Get the source bead info from the workflow epic (not from workItem.id which may be a step ID)
     const sourceInfo = getSourceBeadInfo(work.workflowEpicId);
     if (!sourceInfo) {
-      console.warn(`Could not find source bead info for epic ${work.workflowEpicId}`);
+      this.logger.warn(`Could not find source bead info for epic ${work.workflowEpicId}`);
       return;
     }
 
@@ -1295,9 +1331,9 @@ export class Dispatcher {
           `Completed by WHS workflow`,
           expandPath(project.repoPath)
         );
-        console.log(`   Closed source bead: ${sourceInfo.project}/${sourceInfo.beadId}`);
+        this.logger.log(`   Closed source bead: ${sourceInfo.project}/${sourceInfo.beadId}`);
       } catch (err) {
-        console.warn(`Failed to close source bead ${sourceInfo.beadId}: ${err}`);
+        this.logger.warn(`Failed to close source bead ${sourceInfo.beadId}: ${err}`);
       }
     }
 
@@ -1305,11 +1341,11 @@ export class Dispatcher {
     try {
       removeWorktree(sourceInfo.project, sourceInfo.beadId, { force: true });
     } catch (err) {
-      console.warn(`Failed to remove worktree ${sourceInfo.project}/${sourceInfo.beadId}: ${err}`);
+      this.logger.warn(`Failed to remove worktree ${sourceInfo.project}/${sourceInfo.beadId}: ${err}`);
     }
 
     await this.notifier.notifyComplete(work, "done");
-    console.log(`✅ Workflow complete: ${sourceInfo.project}/${sourceInfo.beadId}`);
+    this.logger.log(`✅ Workflow complete: ${sourceInfo.project}/${sourceInfo.beadId}`);
   }
 
   /**
@@ -1319,7 +1355,7 @@ export class Dispatcher {
     completeWorkflow(work.workflowEpicId, "blocked", reason);
     recordWorkflowComplete(work.workflowEpicId, "blocked");
     await this.notifier.notifyComplete(work, "blocked");
-    console.log(`🚫 Workflow blocked: ${work.workItem.project}/${work.workItem.id} - ${reason}`);
+    this.logger.log(`🚫 Workflow blocked: ${work.workItem.project}/${work.workItem.id} - ${reason}`);
   }
 
   /**
@@ -1330,15 +1366,15 @@ export class Dispatcher {
    * (not blocked:human) so the workflow auto-recovers on restart.
    */
   private async handleAuthError(work: ActiveWork, message: string): Promise<void> {
-    console.error("\n" + "=".repeat(60));
-    console.error("🔐 AUTHENTICATION ERROR - STOPPING DISPATCHER");
-    console.error("=".repeat(60));
-    console.error(`\nError: ${message}`);
-    console.error("\nAll agents have been stopped. Please fix authentication:");
-    console.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
-    console.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
-    console.error("\nThen restart the dispatcher with 'whs start'");
-    console.error("=".repeat(60) + "\n");
+    this.logger.error("\n" + "=".repeat(60));
+    this.logger.error("🔐 AUTHENTICATION ERROR - STOPPING DISPATCHER");
+    this.logger.error("=".repeat(60));
+    this.logger.error(`\nError: ${message}`);
+    this.logger.error("\nAll agents have been stopped. Please fix authentication:");
+    this.logger.error("  1. Run 'whs claude-login' to refresh OAuth token, or");
+    this.logger.error("  2. Set ANTHROPIC_API_KEY in ~/work/whs-orchestrator/.whs/.env");
+    this.logger.error("\nThen restart the dispatcher with 'whs start'");
+    this.logger.error("=".repeat(60) + "\n");
 
     // Notify about the auth error
     await this.notifier.notifyError(work, new Error(`Authentication failed: ${message}`));
@@ -1359,14 +1395,14 @@ export class Dispatcher {
     const message = err instanceof Error ? err.message : String(err);
 
     if (this.isRateLimitError(err)) {
-      console.log("⚠️  Rate limit hit, pausing dispatcher");
+      this.logger.log("⚠️  Rate limit hit, pausing dispatcher");
       await this.notifier.notifyRateLimit(err as Error);
       this.pause();
       // Keep work item active for retry
       return;
     }
 
-    console.error(`❌ Agent error for ${work.workItem.id}: ${message}`);
+    this.logger.error(`❌ Agent error for ${work.workItem.id}: ${message}`);
     await this.notifier.notifyError(work, err as Error);
 
     // Mark workflow as blocked
@@ -1379,13 +1415,13 @@ export class Dispatcher {
    */
   private async handleDispatchError(work: WorkItem, err: unknown): Promise<void> {
     if (this.isRateLimitError(err)) {
-      console.log("⚠️  Rate limit detected, pausing");
+      this.logger.log("⚠️  Rate limit detected, pausing");
       await this.notifier.notifyRateLimit(err as Error);
       this.pause();
       return;
     }
 
-    console.error(`Error dispatching ${work.id}:`, err);
+    this.logger.error(`Error dispatching ${work.id}: ${err}`);
   }
 
   private isRateLimitError(err: unknown): boolean {
@@ -1437,14 +1473,25 @@ export class Dispatcher {
     active: ActiveWork[];
     pendingQuestionCount: number;
     paused: boolean;
+    startedAt: Date;
+    todayCost: number;
   } {
     const orchestratorPath = expandPath(this.config.orchestratorPath);
     const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
+
+    let todayCost = 0;
+    try {
+      todayCost = getTodayCost();
+    } catch {
+      // metrics DB may not be initialized
+    }
 
     return {
       active: [...this.state.activeWork.values()],
       pendingQuestionCount: pendingQuestions.length,
       paused: this.state.paused,
+      startedAt: this.startedAt,
+      todayCost,
     };
   }
 }
