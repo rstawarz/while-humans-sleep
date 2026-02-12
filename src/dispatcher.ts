@@ -56,7 +56,7 @@ import {
   retryWorkflow,
 } from "./workflow.js";
 import { execSync } from "child_process";
-import { ensureWorktree, removeWorktree, cleanupWorktrees } from "./worktree.js";
+import { ensureWorktree, removeWorktree, listWorktrees } from "./worktree.js";
 import { formatAgentPrompt, type AgentRunner } from "./agent-runner.js";
 import { createAgentRunner } from "./agent-runner-factory.js";
 import { getHandoff, isValidAgent } from "./handoff.js";
@@ -490,9 +490,11 @@ export class Dispatcher {
    * Clean up worktrees whose branches have been merged into main.
    * Runs periodically alongside daemon health checks.
    *
-   * Fetches origin first so worktrunk can see remote merges
-   * (without this, branches merged via GitHub PR still appear
-   * as "ahead" of the stale local main ref).
+   * Uses `git merge-base --is-ancestor` against `origin/main` to detect
+   * merged branches. This is more reliable than worktrunk's `mainState`
+   * which compares against the local main ref — `git fetch origin` only
+   * updates `origin/main`, not the local `main` branch, so worktrunk
+   * still sees merged branches as "ahead".
    */
   private cleanupMergedWorktrees(): void {
     for (const project of this.projects.values()) {
@@ -504,9 +506,30 @@ export class Dispatcher {
           timeout: 15000,
           stdio: "pipe",
         });
-        const removed = cleanupWorktrees(project.name);
-        for (const branch of removed) {
-          this.logger.log(`🧹 Cleaned up merged worktree: ${project.name}/${branch}`);
+
+        const worktrees = listWorktrees(project.name);
+        for (const wt of worktrees) {
+          if (wt.isMain) continue;
+
+          // Skip worktrees with uncommitted changes
+          if (wt.workingTree?.modified || wt.workingTree?.staged || wt.workingTree?.untracked) {
+            continue;
+          }
+
+          // Check if branch is merged into origin/main
+          try {
+            execSync(`git merge-base --is-ancestor ${wt.branch} origin/main`, {
+              cwd: projectPath,
+              encoding: "utf-8",
+              timeout: 5000,
+              stdio: "pipe",
+            });
+            // Exit code 0 = branch is ancestor of origin/main (merged)
+            removeWorktree(project.name, wt.branch);
+            this.logger.log(`🧹 Cleaned up merged worktree: ${project.name}/${wt.branch}`);
+          } catch {
+            // Exit code 1 = not merged, or branch ref invalid — skip
+          }
         }
       } catch {
         // Non-critical — don't log noise if fetch/wt fails

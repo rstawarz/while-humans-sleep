@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Session resume fails after question answered**: When a Claude CLI session expired between asking a question and receiving an answer, the resume produced no output and the workflow fell through to BLOCKED. Now detects empty resume output and falls back to a fresh agent run with the Q&A context injected into the prompt
+- **Worktree cleanup still missed GitHub-merged branches**: `git fetch origin` only updates `origin/main`, not the local `main` ref. Worktrunk's `mainState` compares against local main, so merged branches still appeared as "ahead". Now uses `git merge-base --is-ancestor` against `origin/main` directly
 
 ## [0.12.1] - 2026-02-11
 
