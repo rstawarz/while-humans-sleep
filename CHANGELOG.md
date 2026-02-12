@@ -5,6 +5,12 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-02-11
+
+### Added
+- **Telegram `/doctor` command**: Run health checks from Telegram — shows beads daemons, daemon errors, errored/blocked workflows, CI-pending PRs, worktrees, and state sanity with pass/warn/fail icons
+- **Telegram `/retry` command**: Retry errored workflows from Telegram — `/retry` auto-retries all errored workflows, `/retry <id>` retries a specific epic (supports both epic IDs and source bead IDs)
+
 ## [0.10.3] - 2026-02-11
 
 ### Fixed
