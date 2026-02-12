@@ -491,6 +491,96 @@ describe("Dispatcher E2E", () => {
     });
   });
 
+  describe("Workflow: Session resume fallback", () => {
+    it("falls back to fresh agent run when session resume produces no output", async () => {
+      const { Dispatcher } = await import("./dispatcher.js");
+
+      // No new work in projects
+      mockBeads.ready.mockReturnValue([]);
+
+      // A workflow step is ready and has resume info (question was answered)
+      mockWorkflow.getReadyWorkflowSteps.mockReturnValue([
+        {
+          id: "bd-w001.1",
+          epicId: "bd-w001",
+          agent: "planner",
+          context: "Plan the feature",
+          status: "open",
+        },
+      ]);
+
+      // Step has resume info (question was answered)
+      mockWorkflow.getStepResumeInfo.mockReturnValue({
+        sessionId: "expired-session-123",
+        answer: "Use JWT tokens",
+        worktree: "/tmp/worktree/test-project/bd-123",
+      });
+
+      mockWorkflow.getWorkflowEpic.mockReturnValue({
+        id: "bd-w001",
+        title: "test-project:bd-123 - Test task",
+        labels: ["project:test-project", "source:bd-123"],
+      });
+
+      mockWorkflow.getSourceBeadInfo.mockReturnValue({
+        project: "test-project",
+        beadId: "bd-123",
+      });
+
+      // Resume produces NO output (session expired)
+      mockAgentRunnerInstance.resumeWithAnswer.mockResolvedValue({
+        sessionId: "",
+        output: "",
+        costUsd: 0,
+        turns: 0,
+        success: false,
+        error: "Session not found",
+      });
+
+      // Fresh agent run succeeds with a handoff
+      mockAgentRunnerInstance.run.mockResolvedValue({
+        sessionId: "fresh-session-456",
+        output: "Plan complete!",
+        costUsd: 0.05,
+        turns: 5,
+        success: true,
+      });
+
+      mockHandoff.getHandoff.mockResolvedValue({
+        next_agent: "DONE",
+        context: "Planning complete, tasks created.",
+      });
+
+      const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
+      await (dispatcher as any).tick();
+      await flushPromises();
+
+      // Resume should have been attempted first
+      expect(mockAgentRunnerInstance.resumeWithAnswer).toHaveBeenCalledWith(
+        "expired-session-123",
+        "Use JWT tokens",
+        expect.any(Object)
+      );
+
+      // Fresh agent run should have been called as fallback
+      expect(mockAgentRunnerInstance.run).toHaveBeenCalled();
+
+      // The prompt should include the answer context
+      const runCall = mockAgentRunnerInstance.run.mock.calls[0][0];
+      // formatAgentPrompt is mocked, but the work item description
+      // passed to runAgentStep should contain the answer
+      expect(mockAgentRunner.formatAgentPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskDescription: expect.stringContaining("Use JWT tokens"),
+        })
+      );
+
+      // Resume info should have been cleared
+      expect(mockWorkflow.clearStepResumeInfo).toHaveBeenCalledWith("bd-w001.1");
+    });
+  });
+
   describe("Error handling", () => {
     it("pauses on rate limit error", async () => {
       const { Dispatcher } = await import("./dispatcher.js");

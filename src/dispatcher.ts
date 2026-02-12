@@ -1189,6 +1189,34 @@ export class Dispatcher {
         return;
       }
 
+      // Check if resume produced no output — session may have expired.
+      // Fall back to a fresh agent run with the Q&A context injected,
+      // instead of going through the doomed handoff detection chain.
+      if (!result.output.trim() && !result.pendingQuestion) {
+        this.logger.warn(
+          `⚠️ Session resume produced no output (session ${sessionId} may have expired)`
+        );
+        this.logger.log(`   Falling back to fresh agent run with answer context`);
+
+        // Enrich the description with the Q&A so the fresh agent has context
+        const enrichedWork: ActiveWork = {
+          ...work,
+          workItem: {
+            ...work.workItem,
+            description:
+              work.workItem.description +
+              `\n\n## Previously Asked Question & Answer\n` +
+              `The previous agent session asked a question and received this answer:\n\n` +
+              `**Answer:** ${answer}\n\n` +
+              `Please incorporate this answer into your work.`,
+          },
+          sessionId: "", // Fresh session
+        };
+
+        await this.runAgentStep(enrichedWork);
+        return;
+      }
+
       // Check for another pending question
       if (result.pendingQuestion) {
         await this.handlePendingQuestion(work, result);
