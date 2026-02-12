@@ -4,7 +4,7 @@
  * While Humans Sleep - CLI
  */
 
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { Command } from "commander";
@@ -752,6 +752,7 @@ program
   .description("Start planning a new feature (interactive)")
   .option("-P, --project <name>", "Project name (default: infer from cwd)")
   .option("-p, --priority <level>", "Priority level (0-4, where 0 is critical)")
+  .option("-f, --file <path>", "Plan document to feed to the planner agent")
   .option("--parallel", "Allow this epic to run in parallel with existing epics")
   .action(async (inputDescription, options) => {
     const { createInterface } = await import("readline");
@@ -818,8 +819,24 @@ program
 
       console.log(`\n📋 Planning for project: ${projectName}\n`);
 
-      // 2. Get description
+      // 2. Read plan file if provided
+      let planFileContent = "";
+      if (options.file) {
+        const filePath = resolve(expandPath(project.repoPath), options.file);
+        if (!existsSync(filePath)) {
+          console.error(`Error: File not found: ${filePath}`);
+          process.exit(1);
+        }
+        planFileContent = readFileSync(filePath, "utf-8");
+      }
+
+      // 3. Get description
       let description = inputDescription;
+      if (!description && planFileContent) {
+        // Derive title from file name: "ux-master-plan.md" → "ux-master-plan"
+        const fileName = options.file.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
+        description = fileName.replace(/[-_]/g, " ");
+      }
       if (!description) {
         description = await ask("What do you want to build? ");
         if (!description) {
@@ -851,14 +868,21 @@ program
       console.log(`   Project: ${projectName}`);
       console.log(`   Feature: ${description}`);
       console.log(`   Priority: ${priority}`);
+      if (planFileContent) {
+        console.log(`   Plan file: ${options.file}`);
+      }
       console.log("");
 
       // Create epic in project beads (blocked status)
+      const epicDescription = planFileContent
+        ? `Epic for: ${description}\n\nCreated via whs plan. The planning task must complete before implementation begins.\n\n## Plan Document (${options.file})\n\n${planFileContent}`
+        : `Epic for: ${description}\n\nCreated via whs plan. The planning task must complete before implementation begins.`;
+
       const epic = beads.create(description, projectPath, {
         type: "epic",
         status: "blocked",
         priority,
-        description: `Epic for: ${description}\n\nCreated via whs plan. The planning task must complete before implementation begins.`,
+        description: epicDescription,
         labels: ["whs", "needs-planning"],
       });
 
@@ -883,11 +907,28 @@ program
 
       // Create planning task (open status)
       // Use label to track epic association instead of parent (to avoid dependency cycle)
+      const planningTaskDescription = planFileContent
+        ? [
+            `Planning task for: ${description}`,
+            "",
+            "A plan document has been provided. Your job is to:",
+            "1. Read and understand the plan document below",
+            "2. Analyze the codebase to understand how it maps to the existing project",
+            "3. Ask clarifying questions if anything is ambiguous",
+            "4. Break the plan into concrete beads epics and tasks with dependencies",
+            "5. Create the epics/tasks in beads after approval",
+            "",
+            `## Plan Document (${options.file})`,
+            "",
+            planFileContent,
+          ].join("\n")
+        : `Planning task for: ${description}\n\nThis task will be picked up by the dispatcher to run the planner agent.\nThe planner will:\n1. Analyze the codebase\n2. Ask clarifying questions\n3. Create implementation subtasks\n4. Present a plan for approval`;
+
       const planningTask = beads.create(`Plan: ${description}`, projectPath, {
         type: "task",
         status: "open",
         priority,
-        description: `Planning task for: ${description}\n\nThis task will be picked up by the dispatcher to run the planner agent.\nThe planner will:\n1. Analyze the codebase\n2. Ask clarifying questions\n3. Create implementation subtasks\n4. Present a plan for approval`,
+        description: planningTaskDescription,
         labels: ["whs", "planning", "agent:planner", `epic:${epic.id}`],
       });
 
