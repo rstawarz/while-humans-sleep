@@ -95,22 +95,46 @@ const result = execSync("bd ready --json", {
 
 ```
 src/
-├── index.ts           # Public exports
-├── cli.ts             # CLI entry point
-├── dispatcher.ts      # Main orchestration loop
-├── types.ts           # All TypeScript interfaces
-├── config.ts          # Config management (~/.whs/)
-├── state.ts           # State persistence for crash recovery
-├── metrics.ts         # SQLite metrics database
-├── worktree.ts        # Worktrunk wrapper
-├── workflow.ts        # Workflow orchestration (orchestrator beads)
-├── handoff.ts         # Handoff parsing and tool
-├── agent-runner.ts    # Claude SDK wrapper
-├── beads/
-│   └── client.ts      # Beads CLI wrapper
-└── notifiers/
-    ├── cli.ts         # Console notifications
-    └── slack.ts       # Slack notifications (future)
+├── cli.ts                      # CLI entry point (25 commands)
+├── dispatcher.ts               # Main orchestration loop
+├── workflow.ts                 # Workflow epic/step management
+├── agent-runner.ts             # Agent prompt formatting
+├── agent-runner-interface.ts   # AgentRunner interface
+├── agent-runner-factory.ts     # CLI vs SDK runner factory
+├── cli-agent-runner.ts         # Claude CLI runner
+├── claude-sdk-agent-runner.ts  # Claude SDK runner
+├── handoff.ts                  # Handoff parsing (file → output → resume)
+├── questions.ts                # Question handling
+├── config.ts                   # Config management (.whs/)
+├── state.ts                    # Crash recovery state
+├── status.ts                   # Status data (shared CLI + Telegram)
+├── metrics.ts                  # SQLite metrics database
+├── doctor.ts                   # Health check system
+├── worktree.ts                 # Worktrunk wrapper
+├── worktree-hooks.ts           # Worktree hook analysis
+├── agent-log.ts                # Per-step JSONL activity logs
+├── logger.ts                   # Logger interface
+├── plan-parser.ts              # Plan document parser
+├── review-setup.ts             # Code review format setup
+├── version.ts                  # Version info
+├── types.ts                    # TypeScript interfaces
+├── index.ts                    # Public exports
+├── beads/                      # Beads CLI wrapper
+│   ├── client.ts               # bd command wrapper
+│   ├── index.ts                # Public exports
+│   └── types.ts                # Beads types
+├── notifiers/
+│   └── cli.ts                  # Console notifications
+├── telegram/                   # Telegram bot integration
+│   ├── service.ts              # Grammy bot
+│   ├── setup.ts                # Setup wizard
+│   ├── formatter.ts            # MarkdownV2 formatting
+│   ├── message-store.ts        # Message persistence
+│   └── handlers/               # Command + question handlers
+└── tui/                        # Terminal dashboard (ink + React)
+    ├── Dashboard.tsx            # Main dashboard component
+    ├── AgentPanel.tsx           # Agent status panel
+    └── tui-logger.ts           # TUI-aware logger
 ```
 
 ## Testing
@@ -195,8 +219,10 @@ If parsing fails, the dispatcher will resume the session and request handoff via
 Key packages:
 - `commander` — CLI framework
 - `better-sqlite3` — Metrics database
-- `@anthropic-ai/claude-agent-sdk` — Agent execution (when available)
+- `@anthropic-ai/claude-agent-sdk` — Agent execution
 - `yaml` — YAML parsing for handoffs
+- `grammy` — Telegram bot framework
+- `ink` + `react` — Terminal UI dashboard
 
 ## Links
 

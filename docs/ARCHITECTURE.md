@@ -1,6 +1,6 @@
 # Agentic Dispatcher Architecture
 
-> Plan for migrating NEC from bash/Ruby CLI orchestration to a TypeScript-based dispatcher using the Claude Agent SDK, with Beads for task and workflow state management.
+> Architecture of the While Humans Sleep (WHS) multi-project agent dispatcher using the Claude Agent SDK, with Beads for task and workflow state management.
 
 ## Overview
 
@@ -88,7 +88,7 @@ Beads provides:
 Separate from project beads, the orchestrator maintains its own beads repo to track workflow execution state:
 
 ```
-~/work/nec-orchestrator/.beads/   # workflow execution state
+~/work/whs-orchestrator/.beads/   # workflow execution state
 ```
 
 **Structure:**
@@ -161,7 +161,7 @@ When an agent calls `AskUserQuestion`, the dispatcher:
 4. Waits for answer
 5. Resumes the session with the answer
 
-**Notifier interface (for future Slack support):**
+**Notifier interface:**
 
 ```typescript
 interface Notifier {
@@ -172,16 +172,17 @@ interface Notifier {
 }
 ```
 
-**MVP:** CLI notifier prints to console, user answers via `nec answer <id> "response"`
-
-**Future:** Slack notifier posts to channel, user replies in thread, webhook captures response
+**Implementations:**
+- **CLI notifier** — Prints to console, user answers via `whs answer <id> "response"`
+- **Telegram notifier** — Bot sends questions with inline buttons, user replies in chat. Includes `/status`, `/pause`, `/resume`, `/doctor`, `/retry` commands
+- **Slack notifier** — Future: Slack integration for team-based workflows
 
 ### 7. Planning Workflow
 
 For new features, a planning phase precedes implementation:
 
 ```
-User: nec plan argyn "add user authentication"
+User: whs plan argyn "add user authentication"
 ```
 
 **Flow:**
@@ -216,7 +217,7 @@ When `bd-a3f8.plan` closes, the downstream tasks unblock in dependency order.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         NEC Dispatcher (Node.js)                            │
+│                         WHS Dispatcher (Node.js)                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
@@ -239,8 +240,8 @@ When `bd-a3f8.plan` closes, the downstream tasks unblock in dependency order.
 │                                                   ▼                         │
 │                                            ┌──────────────┐                │
 │                                            │ Notifier     │                │
-│                                            │ - CLI (MVP)  │                │
-│                                            │ - Slack      │                │
+│                                            │ - CLI        │                │
+│                                            │ - Telegram   │                │
 │                                            └──────────────┘                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -357,34 +358,34 @@ async function onAgentComplete(
 
 ```bash
 # Start the dispatcher (runs continuously)
-nec start
+whs start
 
 # Plan a new feature (creates planning workflow)
-nec plan argyn "add user authentication"
+whs plan argyn "add user authentication"
 
 # Answer a pending question
-nec answer <question-id> "use JWT with refresh tokens"
+whs answer <question-id> "use JWT with refresh tokens"
 
 # Show status
-nec status
+whs status
 
 # Show active work across all projects
-nec status --active
+whs status --active
 
 # Show pending questions
-nec status --questions
+whs status --questions
 
 # Stop a specific workflow
-nec stop argyn/bd-a3f8.1
+whs stop argyn/bd-a3f8.1
 
 # Stop all work gracefully
-nec stop --all
+whs stop --all
 ```
 
 ## Directory Structure
 
 ```
-nec-dispatcher/
+while-humans-sleep/
 ├── src/
 │   ├── index.ts              # CLI entry point
 │   ├── dispatcher.ts         # Main dispatcher class
@@ -430,7 +431,7 @@ nec-dispatcher/
       "agentsPath": "docs/llm/agents"
     }
   ],
-  "orchestratorPath": "~/work/nec-orchestrator",
+  "orchestratorPath": "~/work/whs-orchestrator",
   "concurrency": {
     "maxTotal": 4,
     "maxPerProject": 2
@@ -445,38 +446,39 @@ nec-dispatcher/
 
 ## Migration Path
 
-### Phase 1: Core Dispatcher (MVP)
-- [ ] Set up TypeScript project with Agent SDK
-- [ ] Implement single-project agent dispatch via SDK
-- [ ] Implement worktree creation/cleanup
-- [ ] Implement basic handoff parsing (keep shared notes file for now)
-- [ ] CLI notifier for questions
-- [ ] Test with one project (argyn)
+### Phase 1: Core Dispatcher (MVP) — Complete
+- [x] Set up TypeScript project with Agent SDK
+- [x] Implement single-project agent dispatch via SDK
+- [x] Implement worktree creation/cleanup
+- [x] Implement basic handoff parsing (keep shared notes file for now)
+- [x] CLI notifier for questions
+- [x] Test with one project (argyn)
 
-### Phase 2: Beads Integration
-- [ ] Install beads in test project
-- [ ] Replace GitHub Issues polling with `bd ready`
-- [ ] Create orchestrator beads repo
-- [ ] Implement workflow epic/step pattern
-- [ ] Remove shared notes file dependency for handoffs
+### Phase 2: Beads Integration — Complete
+- [x] Install beads in test project
+- [x] Replace GitHub Issues polling with `bd ready`
+- [x] Create orchestrator beads repo
+- [x] Implement workflow epic/step pattern
+- [x] Remove shared notes file dependency for handoffs
 
-### Phase 3: Multi-Project
-- [ ] Add project registry
-- [ ] Implement per-project concurrency limits
-- [ ] Test with all three projects
-- [ ] Add cross-project status view
+### Phase 3: Multi-Project — Complete
+- [x] Add project registry
+- [x] Implement per-project concurrency limits
+- [x] Test with all three projects
+- [x] Add cross-project status view
 
-### Phase 4: Planning Workflow
-- [ ] Implement planner agent
-- [ ] Planning task → subtask creation flow
-- [ ] User approval workflow
-- [ ] Integrate with AskUserQuestion
+### Phase 4: Planning Workflow — Complete
+- [x] Implement planner agent
+- [x] Planning task → subtask creation flow
+- [x] User approval workflow
+- [x] Integrate with AskUserQuestion
 
-### Phase 5: Slack Integration
+### Phase 5: Notifications — Partially Complete
+- [x] Telegram bot implementation (grammy)
+- [x] Question answering via Telegram replies/buttons
+- [x] Telegram commands: /status, /pause, /resume, /doctor, /retry
 - [ ] Slack notifier implementation
 - [ ] Webhook receiver for thread replies
-- [ ] Question → answer mapping
-- [ ] Session resumption from Slack answers
 
 ## Comparison: Current vs New
 
@@ -500,7 +502,7 @@ nec-dispatcher/
 
 ```typescript
 for await (const message of query(prompt, {
-  agentDefinition: "docs/llm/agents/nec-senior-engineer.md",
+  agentDefinition: "docs/llm/agents/whs-implementation.md",
 })) { ... }
 ```
 
@@ -549,7 +551,7 @@ bd update bd-a3f8.1 --label-add needs-migration
 
 **Decision:** Per-project choice made at onboarding time.
 
-When running `nec add <project>`, prompt:
+When running `whs add <project>`, prompt:
 ```
 Beads mode:
   1. Committed - .beads/ tracked in git (recommended for solo projects)
@@ -562,7 +564,7 @@ Store in project config as `beadsMode: "committed" | "stealth"`.
 
 **Decision:** Track at all levels, store in SQLite.
 
-Location: `~/.nec/metrics.db`
+Location: `~/.whs/metrics.db`
 
 ```sql
 CREATE TABLE workflow_runs (
@@ -691,7 +693,7 @@ When a rate limit error is detected:
 1. Pause the dispatcher (stop picking up new work)
 2. Requeue the current work item
 3. Notify user via CLI/Slack
-4. User runs `nec resume` when ready
+4. User runs `whs resume` when ready
 
 ```typescript
 async function dispatchAgent(work: WorkItem): Promise<void> {
