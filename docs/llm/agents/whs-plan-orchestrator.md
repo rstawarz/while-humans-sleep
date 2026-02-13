@@ -69,7 +69,6 @@ You orchestrate the planning workflow, coordinating between Engineer, UX Reviewe
 
 You receive from the skill invocation:
 - **Feature**: The feature name (e.g., `clerk-to-rodauth-kamal`)
-- **Story Code**: Prefix for story IDs (e.g., `CLERK`)
 - **Plan Directory**: Where to output files (e.g., `docs/plans/clerk-to-rodauth-kamal/`)
 - **Product Proposal**: The proposal content
 
@@ -110,7 +109,6 @@ next_agent: whs-plan-engineer
 next_action: create_proposal
 context: |
   Feature: {feature}
-  Story Code: {story_code}
   Plan Directory: {plan_directory}
 
   Product Proposal:
@@ -237,7 +235,6 @@ next_agent: whs-plan-engineer
 next_action: create_stories
 context: |
   Feature: {feature}
-  Story Code: {story_code}
   Plan Directory: {plan_directory}
 
   The technical proposal has been approved.
@@ -246,7 +243,7 @@ context: |
   Break this down into INVEST stories.
   Output to: {plan_directory}/stories/
 
-  Story file naming: {story_code}-01-{slug}.md, {story_code}-02-{slug}.md, etc.
+  Story file naming: 01-{slug}.md, 02-{slug}.md, etc.
   Index file: {plan_directory}/stories/index.md
 blockers: none
 ```
@@ -307,7 +304,6 @@ next_agent: whs-plan-engineer
 next_action: consolidate_plan
 context: |
   Feature: {feature}
-  Story Code: {story_code}
   Plan Directory: {plan_directory}
 
   All stories approved. Consolidate into import document.

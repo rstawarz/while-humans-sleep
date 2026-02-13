@@ -37,23 +37,15 @@ docs/plans/{feature-name}/
 ├── planning_session.md       # Audit trail of the planning process
 ├── stories/
 │   ├── index.md              # Story index with dependency graph
-│   ├── {CODE}-01-{slug}.md   # Story files (e.g., AUTH-01-add-login-endpoint.md)
-│   ├── {CODE}-02-{slug}.md
+│   ├── 01-{slug}.md          # Story files (e.g., 01-add-login-endpoint.md)
+│   ├── 02-{slug}.md
 │   └── ...
 └── plan-import.md            # Importable plan document for whs import
 ```
 
-### Story ID Convention
+### Story File Naming
 
-Stories are numbered sequentially with a code derived from the feature name:
-
-| Feature Name | Code | Example Story ID |
-|--------------|------|------------------|
-| `user-auth` | `AUTH` | `AUTH-01`, `AUTH-02` |
-| `clerk-to-rodauth-kamal` | `CLERK` | `CLERK-01`, `CLERK-02` |
-| `dashboard-export` | `DASH` | `DASH-01`, `DASH-02` |
-
-The code is generated from the first word of the feature name, uppercased, max 5 characters.
+Stories are numbered sequentially with a kebab-case slug: `01-add-login-endpoint.md`, `02-create-user-migration.md`, etc. The feature folder provides the namespace — no code prefix needed.
 
 ## What It Does
 
@@ -103,7 +95,6 @@ When this skill is invoked, you ARE the orchestrator. Follow these steps:
 Extract from the provided path:
 - **Feature name**: Parent folder name
 - **Plan directory**: Parent folder path
-- **Story code**: First word of feature name, uppercased, max 5 chars
 
 Example:
 ```
@@ -111,7 +102,6 @@ Input: docs/plans/clerk-to-rodauth-kamal/product_proposal.md
 
 Feature name: clerk-to-rodauth-kamal
 Plan directory: docs/plans/clerk-to-rodauth-kamal/
-Story code: CLERK
 ```
 
 ### 2. Validate
@@ -152,7 +142,6 @@ Task(subagent_type: "whs-plan-engineer")
 MODE: create_proposal
 
 Feature: {feature_name}
-Story Code: {story_code}
 Plan Directory: {plan_directory}
 
 Product Proposal:
@@ -249,7 +238,6 @@ Task(subagent_type: "whs-plan-engineer")
 MODE: create_stories
 
 Feature: {feature_name}
-Story Code: {story_code}
 Plan Directory: {plan_directory}
 
 The technical proposal has been approved.
@@ -257,7 +245,7 @@ Location: {plan_directory}/technical_proposal.md
 
 Break this down into INVEST stories.
 Output to: {plan_directory}/stories/
-Story file naming: {story_code}-01-{slug}.md, {story_code}-02-{slug}.md, etc.
+Story file naming: 01-{slug}.md, 02-{slug}.md, etc.
 Index file: {plan_directory}/stories/index.md
 ```
 
@@ -277,7 +265,6 @@ Task(subagent_type: "whs-plan-engineer")
 MODE: consolidate_plan
 
 Feature: {feature_name}
-Story Code: {story_code}
 Plan Directory: {plan_directory}
 
 All stories approved. Consolidate into import document.

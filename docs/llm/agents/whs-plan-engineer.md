@@ -23,7 +23,6 @@ You are a senior engineer who drives the technical planning process. You create 
 
 From every invocation, you receive:
 - **Feature**: The feature name (e.g., `clerk-to-rodauth-kamal`)
-- **Story Code**: Prefix for story IDs (e.g., `CLERK`)
 - **Plan Directory**: Where to output files (e.g., `docs/plans/clerk-to-rodauth-kamal/`)
 
 Always use these values from context - never hardcode paths.
@@ -256,7 +255,6 @@ blockers: none
 You receive:
 - Approved technical proposal location: `{plan_directory}/technical_proposal.md`
 - Output location for stories: `{plan_directory}/stories/`
-- Story code for IDs: `{story_code}` (e.g., `CLERK`)
 
 ### INVEST Criteria
 
@@ -289,20 +287,20 @@ For each potential story, verify INVEST:
 
 #### 3. Write Stories
 
-For each story, create: `{plan_directory}/stories/{story_code}-{NN}-{slug}.md`
+For each story, create: `{plan_directory}/stories/{NN}-{slug}.md`
 
 **File naming convention:**
-- `{story_code}` from context (e.g., `CLERK`)
 - `{NN}` is zero-padded number (01, 02, 03...)
 - `{slug}` is kebab-case description
+- The feature folder provides the namespace — no code prefix needed
 
 Examples:
-- `CLERK-01-setup-rodauth-gem.md`
-- `CLERK-02-create-user-migration.md`
-- `CLERK-03-add-login-page.md`
+- `01-setup-auth-gem.md`
+- `02-create-user-migration.md`
+- `03-add-login-page.md`
 
 ```markdown
-# Story {story_code}-{NN}: {Title}
+# Story {NN}: {Title}
 
 ## Description
 
@@ -340,8 +338,8 @@ task
 
 ## Dependencies
 
-- **Depends on**: [Story IDs, or "None"]
-- **Blocks**: [Story IDs, or "None"]
+- **Depends on**: [Story numbers or titles, or "None"]
+- **Blocks**: [Story numbers or titles, or "None"]
 
 ## INVEST Check
 
@@ -400,25 +398,25 @@ Estimated scope: {T-shirt size from proposal}
 
 ## Stories
 
-| ID | Title | Priority | Type | Labels | Depends On |
-|----|-------|----------|------|--------|------------|
-| {story_code}-01 | {Title} | 2 | task | `label` | - |
-| {story_code}-02 | {Title} | 1 | feature | `label` | {story_code}-01 |
+| # | Title | Priority | Type | Labels | Depends On |
+|---|-------|----------|------|--------|------------|
+| 01 | {Title} | 2 | task | `label` | - |
+| 02 | {Title} | 1 | feature | `label` | 01 |
 
 ## Dependency Graph
 
 ```
-{story_code}-01 ─────┐
-                     ├──▶ {story_code}-03
-{story_code}-02 ─────┘
+01 ─────┐
+        ├──▶ 03
+02 ─────┘
 ```
 
 ## Execution Order
 
 Suggested order based on dependencies:
 
-1. {story_code}-01: {Title}
-2. {story_code}-02: {Title}
+1. 01: {Title}
+2. 02: {Title}
 ...
 ```
 
@@ -509,10 +507,10 @@ Another story description.
 
 | Story Field | Import Field | Mapping |
 |-------------|-------------|---------|
-| Title | `## Story: {title}` | Story title without code prefix (e.g., "Add login endpoint" not "AUTH-01: Add login endpoint") |
+| Title | `## Story: {title}` | Story title without number prefix (e.g., "Add login endpoint" not "01: Add login endpoint") |
 | Priority | `**Priority**: {0-4}` | Direct from story's Priority section |
 | Type | `**Type**: {type}` | Direct from story's Type section |
-| Dependencies | `**Depends on**: {titles}` | Convert story code refs (e.g., `AUTH-01`) to the full title of the referenced story |
+| Dependencies | `**Depends on**: {titles}` | Convert story number refs (e.g., `01`) to the full title of the referenced story |
 | Description | Free text after metadata | Merge the Description, User Value, Acceptance Criteria, and Technical Notes sections |
 
 **Fields to drop** (working artifacts, not needed for import):
@@ -593,5 +591,5 @@ The orchestrator will route to PM and return with answers.
 - **INVEST is non-negotiable** - Every story must pass
 - **Document decisions** - Future engineers need to understand why
 - **Flag questions early** - Don't assume; ask the PM
-- **Use provided paths** - Always use `{plan_directory}` and `{story_code}` from context
+- **Use provided paths** - Always use `{plan_directory}` from context
 - **Tech-stack agnostic** - Don't assume any particular language or framework; read the project's docs
