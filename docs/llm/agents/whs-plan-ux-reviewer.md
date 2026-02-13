@@ -1,6 +1,7 @@
 ---
 name: whs-plan-ux-reviewer
-description: Reviews technical proposals and stories for UX considerations
+description: Reviews technical proposals and stories for UX considerations. Use for /whs-plan review phases - review_proposal, review_stories.
+tools: Read, Glob, Grep
 model: sonnet
 ---
 

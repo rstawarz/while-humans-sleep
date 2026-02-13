@@ -57,43 +57,42 @@ The code is generated from the first word of the feature name, uppercased, max 5
 
 ## What It Does
 
-This skill orchestrates a three-phase planning workflow. **You (Claude Code) are the orchestrator.** You execute each phase by spawning Task sub-agents that play specific roles (engineer, reviewer, architect), then evaluate their output and decide what happens next.
+This skill orchestrates a three-phase planning workflow. **You (Claude Code) are the orchestrator.** You execute each phase by spawning Task sub-agents (using the registered agent types below), then evaluate their output and decide what happens next.
+
+### Registered Agents
+
+These are custom Claude Code agents installed in `~/.claude/agents/`. Use them via the Task tool with the exact `subagent_type` names shown:
+
+| subagent_type | Model | Role |
+|---------------|-------|------|
+| `whs-plan-engineer` | opus | Creates proposals, stories, and import document |
+| `whs-plan-architect` | opus | Reviews architecture, arbitrates disagreements |
+| `whs-plan-ux-reviewer` | sonnet | Reviews UX aspects |
+| `whs-plan-product-manager` | sonnet | Answers product questions (on-demand) |
+
+**IMPORTANT:** Always use these exact subagent_type names. Do NOT use `general-purpose` or any other built-in type for planning roles. Do NOT invent agent type names.
 
 ### Phase 1: Technical Proposal (max 5 iterations)
 
-1. Spawn **Engineer** to create a technical proposal from the product proposal
-2. Spawn **UX Reviewer** to review for user experience considerations
-3. Spawn **Architect** to review for architectural soundness
-4. **You evaluate** the reviews: if both approve, proceed. If not, spawn Engineer to revise.
+1. Spawn `whs-plan-engineer` to create a technical proposal from the product proposal
+2. Spawn `whs-plan-ux-reviewer` to review for user experience considerations
+3. Spawn `whs-plan-architect` to review for architectural soundness
+4. **You evaluate** the reviews: if both approve, proceed. If not, spawn engineer to revise.
 5. **Loop** until both reviewers sign off (or max 5 iterations reached)
-6. If reviewers flag `needs_product_clarification`, spawn **Product Manager** first
+6. If reviewers flag `needs_product_clarification`, spawn `whs-plan-product-manager` first
 
 ### Phase 2: Story Breakdown (max 3 iterations)
 
-1. Spawn **Engineer** to break the approved proposal into INVEST stories
-2. Spawn **UX Reviewer** to review UI/design-tagged stories
-3. Spawn **Architect** to review all stories for sizing and completeness
-4. **You evaluate** the reviews: if both approve, proceed. If not, spawn Engineer to revise.
+1. Spawn `whs-plan-engineer` to break the approved proposal into INVEST stories
+2. Spawn `whs-plan-ux-reviewer` to review UI/design-tagged stories
+3. Spawn `whs-plan-architect` to review all stories for sizing and completeness
+4. **You evaluate** the reviews: if both approve, proceed. If not, spawn engineer to revise.
 5. **Loop** until both reviewers sign off (or max 3 iterations reached)
 
 ### Phase 3: Plan Consolidation
 
-1. Spawn **Engineer** to consolidate approved stories into `plan-import.md`
+1. Spawn `whs-plan-engineer` to consolidate approved stories into `plan-import.md`
 2. No review loop — stories are already approved
-
-## Agent Definitions
-
-Agent definitions are markdown files that describe each role's behavior, review criteria, and output format. They live in the WHS repo:
-
-```
-~/work/while_humans_sleep/docs/llm/agents/
-├── whs-plan-engineer.md        # Creates proposals, stories, and import document
-├── whs-plan-architect.md       # Reviews architecture, arbitrates disagreements
-├── whs-plan-ux-reviewer.md     # Reviews UX aspects
-└── whs-plan-product-manager.md # Answers product questions (on-demand)
-```
-
-When spawning a Task sub-agent for a role, read the corresponding agent definition file and include its full contents in the Task prompt as the agent's instructions.
 
 ## Instructions
 
@@ -143,100 +142,72 @@ Write `{plan_directory}/planning_session.md`:
 [Will be populated as reviews occur]
 ```
 
-### 4. Read Agent Definitions
+### 4. Phase 1: Technical Proposal
 
-Read all four agent definition files from `~/work/while_humans_sleep/docs/llm/agents/`:
-- `whs-plan-engineer.md`
-- `whs-plan-architect.md`
-- `whs-plan-ux-reviewer.md`
-- `whs-plan-product-manager.md`
-
-Cache their contents — you will include them in Task prompts below.
-
-### 5. Phase 1: Technical Proposal
-
-#### 5a. Spawn Engineer — create_proposal
-
-Launch a Task (subagent_type: `general-purpose`, model: `opus`):
+#### 4a. Spawn Engineer — create_proposal
 
 ```
-You are the Planning Engineer. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-engineer")
 
 MODE: create_proposal
 
-Context:
-  Feature: {feature_name}
-  Story Code: {story_code}
-  Plan Directory: {plan_directory}
+Feature: {feature_name}
+Story Code: {story_code}
+Plan Directory: {plan_directory}
 
 Product Proposal:
 {proposal content}
 
 Create a technical proposal. Output to: {plan_directory}/technical_proposal.md
 Also read the project's CLAUDE.md to understand its tech stack and conventions.
-
---- AGENT DEFINITION ---
-{contents of whs-plan-engineer.md}
 ```
 
-#### 5b. Review Loop (max 5 iterations)
+#### 4b. Review Loop (max 5 iterations)
 
-For each iteration:
+For each iteration, spawn UX Reviewer and Architect (can run in parallel):
 
-**Spawn UX Reviewer** — Task (subagent_type: `general-purpose`, model: `sonnet`):
-
+**UX Reviewer:**
 ```
-You are the Planning UX Reviewer. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-ux-reviewer")
 
 MODE: review_proposal
 
-Context:
-  Feature: {feature_name}
-  Plan Directory: {plan_directory}
-  Iteration: {N} of 5
+Feature: {feature_name}
+Plan Directory: {plan_directory}
+Iteration: {N} of 5
 
 Review the technical proposal at: {plan_directory}/technical_proposal.md
-
---- AGENT DEFINITION ---
-{contents of whs-plan-ux-reviewer.md}
 ```
 
-**Spawn Architect** — Task (subagent_type: `general-purpose`, model: `opus`):
-
+**Architect:**
 ```
-You are the Planning Architect. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-architect")
 
 MODE: review_proposal
 
-Context:
-  Feature: {feature_name}
-  Plan Directory: {plan_directory}
-  Iteration: {N} of 5
+Feature: {feature_name}
+Plan Directory: {plan_directory}
+Iteration: {N} of 5
 
 Review the technical proposal at: {plan_directory}/technical_proposal.md
 UX Feedback: {summary from UX review}
-
---- AGENT DEFINITION ---
-{contents of whs-plan-architect.md}
 ```
 
 **You evaluate**: Read the reviews returned by both sub-agents.
 - If both say `approved` → proceed to Phase 2
-- If either flags `needs_product_clarification` → spawn PM (see 5c), then spawn Engineer to revise
-- If either says `needs_revision` → spawn Engineer to revise with consolidated feedback
+- If either flags `needs_product_clarification` → spawn PM (see 4c), then spawn engineer to revise
+- If either says `needs_revision` → spawn engineer to revise with consolidated feedback
 - If max iterations (5) reached → document unresolved issues, proceed to Phase 2
 
-**Spawn Engineer to revise** — Task (subagent_type: `general-purpose`, model: `opus`):
-
+**Spawn engineer to revise:**
 ```
-You are the Planning Engineer. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-engineer")
 
 MODE: revise_proposal
 
-Context:
-  Feature: {feature_name}
-  Plan Directory: {plan_directory}
-  Iteration: {N} of 5
+Feature: {feature_name}
+Plan Directory: {plan_directory}
+Iteration: {N} of 5
 
 Feedback to incorporate:
 
@@ -250,48 +221,36 @@ Feedback to incorporate:
 {pm clarifications}
 
 Revise the technical proposal at: {plan_directory}/technical_proposal.md
-
---- AGENT DEFINITION ---
-{contents of whs-plan-engineer.md}
 ```
 
 Update `planning_session.md` after each iteration with review summaries.
 
-#### 5c. Consulting the Product Manager (if needed)
-
-Spawn PM — Task (subagent_type: `general-purpose`, model: `sonnet`):
+#### 4c. Consulting the Product Manager (if needed)
 
 ```
-You are the Planning Product Manager. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-product-manager")
 
-Context:
-  Feature: {feature_name}
+Feature: {feature_name}
 
 Questions:
 1. {question from reviewer}
 2. {question from reviewer}
-
---- AGENT DEFINITION ---
-{contents of whs-plan-product-manager.md}
 ```
 
-### 6. Phase 2: Story Breakdown
+### 5. Phase 2: Story Breakdown
 
 Update planning_session.md to Phase 2.
 
-#### 6a. Spawn Engineer — create_stories
-
-Task (subagent_type: `general-purpose`, model: `opus`):
+#### 5a. Spawn Engineer — create_stories
 
 ```
-You are the Planning Engineer. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-engineer")
 
 MODE: create_stories
 
-Context:
-  Feature: {feature_name}
-  Story Code: {story_code}
-  Plan Directory: {plan_directory}
+Feature: {feature_name}
+Story Code: {story_code}
+Plan Directory: {plan_directory}
 
 The technical proposal has been approved.
 Location: {plan_directory}/technical_proposal.md
@@ -300,12 +259,9 @@ Break this down into INVEST stories.
 Output to: {plan_directory}/stories/
 Story file naming: {story_code}-01-{slug}.md, {story_code}-02-{slug}.md, etc.
 Index file: {plan_directory}/stories/index.md
-
---- AGENT DEFINITION ---
-{contents of whs-plan-engineer.md}
 ```
 
-#### 6b. Story Review Loop (max 3 iterations)
+#### 5b. Story Review Loop (max 3 iterations)
 
 Same pattern as Phase 1 review loop, but:
 - UX Reviewer uses MODE: `review_stories` (reviews only UI/UX-labeled stories)
@@ -313,35 +269,29 @@ Same pattern as Phase 1 review loop, but:
 - Engineer uses MODE: `revise_stories` if revisions needed
 - Max 3 iterations (approach is already blessed)
 
-### 7. Phase 3: Plan Consolidation
-
-Spawn Engineer — Task (subagent_type: `general-purpose`, model: `opus`):
+### 6. Phase 3: Plan Consolidation
 
 ```
-You are the Planning Engineer. Follow the instructions in the agent definition below.
+Task(subagent_type: "whs-plan-engineer")
 
 MODE: consolidate_plan
 
-Context:
-  Feature: {feature_name}
-  Story Code: {story_code}
-  Plan Directory: {plan_directory}
+Feature: {feature_name}
+Story Code: {story_code}
+Plan Directory: {plan_directory}
 
 All stories approved. Consolidate into import document.
 Stories: {plan_directory}/stories/
 Output: {plan_directory}/plan-import.md
-
---- AGENT DEFINITION ---
-{contents of whs-plan-engineer.md}
 ```
 
 No review loop — stories are already approved.
 
-### 8. Update Planning Session
+### 7. Update Planning Session
 
 Update `planning_session.md` with final status including iteration counts for each phase.
 
-### 9. Report Completion
+### 8. Report Completion
 
 Tell the user:
 - Location of all outputs (technical proposal, stories, plan-import.md)

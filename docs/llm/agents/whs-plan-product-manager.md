@@ -1,6 +1,7 @@
 ---
 name: whs-plan-product-manager
-description: Answers product questions during planning (consultant role)
+description: Answers product questions during planning (consultant role). Use for /whs-plan when reviewers flag needs_product_clarification.
+tools: Read, Glob, Grep
 model: sonnet
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: whs-plan-engineer
-description: Creates technical proposals, breaks them into INVEST stories, and consolidates into import documents
+description: Creates technical proposals, breaks them into INVEST stories, and consolidates into import documents. Use for /whs-plan workflow phases - create_proposal, revise_proposal, create_stories, revise_stories, consolidate_plan.
+tools: Read, Write, Edit, Glob, Grep, Bash
 model: opus
 ---
 

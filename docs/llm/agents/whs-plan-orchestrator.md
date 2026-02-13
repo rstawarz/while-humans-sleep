@@ -1,6 +1,7 @@
 ---
 name: whs-plan-orchestrator
-description: Orchestrates the three-phase planning workflow (technical proposal → stories → import document)
+description: Orchestrates the three-phase planning workflow (technical proposal → stories → import document). Reference only — the SKILL.md orchestrator logic runs in the main Claude Code session.
+tools: Read, Write, Edit, Glob, Grep, Bash, Task
 model: opus
 ---
 

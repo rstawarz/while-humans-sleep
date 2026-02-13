@@ -1,6 +1,7 @@
 ---
 name: whs-plan-architect
-description: Reviews technical proposals and stories for architectural soundness, arbitrates disagreements
+description: Reviews technical proposals and stories for architectural soundness, arbitrates disagreements. Use for /whs-plan review phases - review_proposal, review_stories, arbitrate.
+tools: Read, Glob, Grep, Bash
 model: opus
 ---
 
