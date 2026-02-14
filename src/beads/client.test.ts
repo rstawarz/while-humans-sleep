@@ -3,16 +3,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { BeadsClient } from "./client.js";
 import type { Bead, RawBead } from "./types.js";
 
 // Mock child_process
 vi.mock("child_process", () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
-const mockExecSync = vi.mocked(execSync);
+const mockExecFileSync = vi.mocked(execFileSync);
 
 describe("BeadsClient", () => {
   let client: BeadsClient;
@@ -57,74 +57,80 @@ describe("BeadsClient", () => {
 
   describe("ready", () => {
     it("returns ready tasks as array", () => {
-      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.ready(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--json"],
         expect.objectContaining({ cwd: testCwd })
       );
       expect(result).toEqual([sampleBead]);
     });
 
     it("passes type filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, { type: "task" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --type task --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--type", "task", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes priority filters", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, { priorityMin: 0, priorityMax: 1 });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --priority-min 0 --priority-max 1 --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--priority-min", "0", "--priority-max", "1", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes label-none filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, { labelNone: ["planning", "blocked"] });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --label-none planning,blocked --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--label-none", "planning,blocked", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes label-all filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, { labelAll: ["whs:step"] });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --label whs:step --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--label", "whs:step", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes label-any filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, { labelAny: ["urgent", "critical"] });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --label-any urgent,critical --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--label-any", "urgent,critical", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes all label filters together", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.ready(testCwd, {
         type: "task",
@@ -132,14 +138,15 @@ describe("BeadsClient", () => {
         labelNone: ["whs:question"],
       });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd ready --type task --label whs:step --label-none whs:question --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["ready", "--type", "task", "--label", "whs:step", "--label-none", "whs:question", "--json"],
         expect.any(Object)
       );
     });
 
     it("returns empty array when no tasks ready", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       const result = client.ready(testCwd);
 
@@ -149,19 +156,20 @@ describe("BeadsClient", () => {
 
   describe("show", () => {
     it("returns bead by id", () => {
-      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.show("bd-a1b2", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd show bd-a1b2 --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["show", "bd-a1b2", "--json"],
         expect.objectContaining({ cwd: testCwd })
       );
       expect(result).toEqual(sampleBead);
     });
 
     it("throws on invalid id", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         const error = new Error("Command failed") as Error & { stderr: string };
         error.stderr = "Error: bead not found: bd-invalid";
         throw error;
@@ -173,41 +181,44 @@ describe("BeadsClient", () => {
 
   describe("list", () => {
     it("lists all beads without filters", () => {
-      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       const result = client.list(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd list --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["list", "--json"],
         expect.any(Object)
       );
       expect(result).toEqual([sampleBead]);
     });
 
     it("passes status filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.list(testCwd, { status: "open" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd list --status open --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["list", "--status", "open", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes parent filter", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.list(testCwd, { parent: "bd-epic1" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd list --parent bd-epic1 --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["list", "--parent", "bd-epic1", "--json"],
         expect.any(Object)
       );
     });
 
     it("passes multiple label filters", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       client.list(testCwd, {
         labelAny: ["urgent", "critical"],
@@ -215,8 +226,9 @@ describe("BeadsClient", () => {
         labelNone: ["wontfix"],
       });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd list --label-any urgent,critical --label backend --label-none wontfix --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["list", "--label-any", "urgent,critical", "--label", "backend", "--label-none", "wontfix", "--json"],
         expect.any(Object)
       );
     });
@@ -224,13 +236,13 @@ describe("BeadsClient", () => {
 
   describe("create", () => {
     it("creates bead with title only", () => {
-      // bd create returns a single object, not an array
-      mockExecSync.mockReturnValue(JSON.stringify(sampleRawBead));
+      mockExecFileSync.mockReturnValue(JSON.stringify(sampleRawBead));
 
       const result = client.create("Implement auth", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd create "Implement auth" --json',
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["create", "Implement auth", "--json"],
         expect.any(Object)
       );
       expect(result).toEqual(sampleBead);
@@ -239,7 +251,7 @@ describe("BeadsClient", () => {
     it("creates bead with all options", () => {
       const beadWithLabels = { ...sampleRawBead, labels: ["backend", "urgent"] };
       // First call is create, second call is show (to fetch labels)
-      mockExecSync
+      mockExecFileSync
         .mockReturnValueOnce(JSON.stringify(sampleRawBead))
         .mockReturnValueOnce(JSON.stringify([beadWithLabels]));
 
@@ -252,14 +264,19 @@ describe("BeadsClient", () => {
         description: "Add JWT authentication",
       });
 
-      // Note: --status is not passed to create (open is default)
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd create "Implement auth" -t task -p 1 --parent bd-epic1 --label backend --label urgent --description "Add JWT authentication" --json',
-        expect.any(Object)
+      // create call: description is passed via stdin (--body-file -)
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["create", "Implement auth", "-t", "task", "-p", "1", "--parent", "bd-epic1", "--label", "backend", "--label", "urgent", "--body-file", "-", "--json"],
+        expect.objectContaining({
+          cwd: testCwd,
+          input: "Add JWT authentication",
+        })
       );
       // When labels are provided, we fetch the full bead to get labels in the response
-      expect(mockExecSync).toHaveBeenCalledWith(
-        `bd show ${sampleRawBead.id} --json`,
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["show", sampleRawBead.id, "--json"],
         expect.any(Object)
       );
       expect(result.labels).toEqual(["backend", "urgent"]);
@@ -270,7 +287,7 @@ describe("BeadsClient", () => {
       const updatedRawBead = { ...sampleRawBead, status: "blocked" };
 
       // First call returns created bead (single object), second call returns updated bead (as array per bd update behavior)
-      mockExecSync
+      mockExecFileSync
         .mockReturnValueOnce(JSON.stringify(createdRawBead))
         .mockReturnValueOnce(JSON.stringify([updatedRawBead]));
 
@@ -279,27 +296,31 @@ describe("BeadsClient", () => {
       });
 
       // Should call create first
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd create "Blocked task" --json',
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["create", "Blocked task", "--json"],
         expect.any(Object)
       );
 
       // Then call update to set status
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd update bd-a1b2 --status blocked --json',
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["update", "bd-a1b2", "--status", "blocked", "--json"],
         expect.any(Object)
       );
 
       expect(result.status).toBe("blocked");
     });
 
-    it("escapes quotes in title", () => {
-      mockExecSync.mockReturnValue(JSON.stringify(sampleRawBead));
+    it("handles quotes in title without escaping (execFileSync handles it)", () => {
+      mockExecFileSync.mockReturnValue(JSON.stringify(sampleRawBead));
 
       client.create('Fix "critical" bug', testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd create "Fix \\"critical\\" bug" --json',
+      // execFileSync passes args as array, no shell escaping needed
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ['create', 'Fix "critical" bug', "--json"],
         expect.any(Object)
       );
     });
@@ -308,45 +329,60 @@ describe("BeadsClient", () => {
   describe("update", () => {
     it("updates bead with new status", () => {
       const updatedBead = { ...sampleBead, status: "in_progress" as const };
-      // bd update returns an array of updated beads
-      mockExecSync.mockReturnValue(JSON.stringify([updatedBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([updatedBead]));
 
       const result = client.update("bd-a1b2", testCwd, { status: "in_progress" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd update bd-a1b2 --status in_progress --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["update", "bd-a1b2", "--status", "in_progress", "--json"],
         expect.any(Object)
       );
       expect(result.status).toBe("in_progress");
     });
 
     it("adds and removes labels", () => {
-      // bd update returns an array of updated beads
-      mockExecSync.mockReturnValue(JSON.stringify([sampleRawBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([sampleRawBead]));
 
       client.update("bd-a1b2", testCwd, {
         labelAdd: ["needs-review"],
         labelRemove: ["wip"],
       });
 
-      // Note: beads CLI uses --add-label and --remove-label, not --label-add/--label-remove
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd update bd-a1b2 --add-label needs-review --remove-label wip --json",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["update", "bd-a1b2", "--add-label", "needs-review", "--remove-label", "wip", "--json"],
         expect.any(Object)
+      );
+    });
+
+    it("passes description via stdin with --body-file -", () => {
+      mockExecFileSync.mockReturnValue(JSON.stringify([sampleRawBead]));
+
+      client.update("bd-a1b2", testCwd, {
+        description: "Updated description\nwith newlines\nand `backticks`",
+      });
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["update", "bd-a1b2", "--body-file", "-", "--json"],
+        expect.objectContaining({
+          input: "Updated description\nwith newlines\nand `backticks`",
+        })
       );
     });
   });
 
   describe("close", () => {
     it("closes bead with reason", () => {
-      // bd close returns array format
       const closedRawBead = { ...sampleRawBead, status: "closed" };
-      mockExecSync.mockReturnValue(JSON.stringify([closedRawBead]));
+      mockExecFileSync.mockReturnValue(JSON.stringify([closedRawBead]));
 
       const result = client.close("bd-a1b2", "PR #47 merged", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd close bd-a1b2 --reason "PR #47 merged" --json',
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["close", "bd-a1b2", "--reason", "PR #47 merged", "--json"],
         expect.any(Object)
       );
       expect(result.status).toBe("closed");
@@ -355,12 +391,13 @@ describe("BeadsClient", () => {
 
   describe("comment", () => {
     it("adds comment to bead", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.comment("bd-a1b2", "Found the issue in auth.ts", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'bd comments add bd-a1b2 "Found the issue in auth.ts"',
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["comments", "add", "bd-a1b2", "Found the issue in auth.ts"],
         expect.any(Object)
       );
     });
@@ -368,12 +405,13 @@ describe("BeadsClient", () => {
 
   describe("depAdd", () => {
     it("adds dependency between beads", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.depAdd("bd-child", "bd-parent", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd dep add bd-child bd-parent",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["dep", "add", "bd-child", "bd-parent"],
         expect.any(Object)
       );
     });
@@ -381,12 +419,13 @@ describe("BeadsClient", () => {
 
   describe("depRemove", () => {
     it("removes dependency between beads", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.depRemove("bd-child", "bd-parent", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd dep remove bd-child bd-parent",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["dep", "remove", "bd-child", "bd-parent"],
         expect.any(Object)
       );
     });
@@ -394,12 +433,13 @@ describe("BeadsClient", () => {
 
   describe("sync", () => {
     it("runs sync command", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.sync(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd sync",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["sync"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
@@ -407,45 +447,49 @@ describe("BeadsClient", () => {
 
   describe("init", () => {
     it("initializes beads in directory", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.init(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd init",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["init"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
 
     it("initializes in stealth mode", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.init(testCwd, { stealth: true });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd init --stealth",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["init", "--stealth"],
         expect.any(Object)
       );
     });
 
     it("initializes with custom prefix", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.init(testCwd, { prefix: "myproj" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd init -p myproj",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["init", "-p", "myproj"],
         expect.any(Object)
       );
     });
 
     it("initializes with stealth and prefix", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.init(testCwd, { stealth: true, prefix: "myproj" });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd init --stealth -p myproj",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["init", "--stealth", "-p", "myproj"],
         expect.any(Object)
       );
     });
@@ -453,12 +497,13 @@ describe("BeadsClient", () => {
 
   describe("setPrefix", () => {
     it("sets the issue prefix via config", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.setPrefix("myproj", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd config set issue_prefix myproj",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["config", "set", "issue_prefix", "myproj"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
@@ -466,19 +511,20 @@ describe("BeadsClient", () => {
 
   describe("getPrefix", () => {
     it("returns the current issue prefix", () => {
-      mockExecSync.mockReturnValue("myproj");
+      mockExecFileSync.mockReturnValue("myproj");
 
       const result = client.getPrefix(testCwd);
 
       expect(result).toBe("myproj");
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd config get issue_prefix",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["config", "get", "issue_prefix"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
 
     it("returns null if prefix not set", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         throw new Error("config key not found");
       });
 
@@ -490,7 +536,7 @@ describe("BeadsClient", () => {
 
   describe("isInitialized", () => {
     it("returns true when beads is initialized", () => {
-      mockExecSync.mockReturnValue("[]");
+      mockExecFileSync.mockReturnValue("[]");
 
       const result = client.isInitialized(testCwd);
 
@@ -498,7 +544,7 @@ describe("BeadsClient", () => {
     });
 
     it("returns false when beads is not initialized", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         throw new Error("Not a beads directory");
       });
 
@@ -510,7 +556,7 @@ describe("BeadsClient", () => {
 
   describe("error handling", () => {
     it("wraps command errors with context", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         const error = new Error("Command failed") as Error & { stderr: string };
         error.stderr = "bd: error: invalid option";
         throw error;
@@ -528,12 +574,13 @@ describe("BeadsClient", () => {
 
   describe("configSet", () => {
     it("sets a config value", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.configSet("sync.branch", "beads-sync", testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd config set sync.branch beads-sync",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["config", "set", "sync.branch", "beads-sync"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
@@ -541,19 +588,20 @@ describe("BeadsClient", () => {
 
   describe("configGet", () => {
     it("returns config value when set", () => {
-      mockExecSync.mockReturnValue("beads-sync");
+      mockExecFileSync.mockReturnValue("beads-sync");
 
       const result = client.configGet("sync.branch", testCwd);
 
       expect(result).toBe("beads-sync");
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd config get sync.branch",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["config", "get", "sync.branch"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
 
     it("returns null when config not set", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         throw new Error("config key not found");
       });
 
@@ -569,23 +617,25 @@ describe("BeadsClient", () => {
 
   describe("daemonStart", () => {
     it("starts daemon without options", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.daemonStart(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd daemon start",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["daemon", "start"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
 
     it("starts daemon with auto-commit", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.daemonStart(testCwd, { autoCommit: true });
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd daemon start --auto-commit",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["daemon", "start", "--auto-commit"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
@@ -593,18 +643,19 @@ describe("BeadsClient", () => {
 
   describe("daemonStop", () => {
     it("stops daemon", () => {
-      mockExecSync.mockReturnValue("");
+      mockExecFileSync.mockReturnValue("");
 
       client.daemonStop(testCwd);
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd daemon stop",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["daemon", "stop"],
         expect.objectContaining({ cwd: testCwd })
       );
     });
 
     it("ignores errors when daemon not running", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         throw new Error("daemon not running");
       });
 
@@ -615,7 +666,7 @@ describe("BeadsClient", () => {
 
   describe("daemonStatus", () => {
     it("returns running status with PID", () => {
-      mockExecSync.mockReturnValue("✓ running (PID 12345, v0.49.3)");
+      mockExecFileSync.mockReturnValue("✓ running (PID 12345, v0.49.3)");
 
       const result = client.daemonStatus(testCwd);
 
@@ -624,7 +675,7 @@ describe("BeadsClient", () => {
     });
 
     it("returns not running when stopped", () => {
-      mockExecSync.mockReturnValue("✗ stopped");
+      mockExecFileSync.mockReturnValue("✗ stopped");
 
       const result = client.daemonStatus(testCwd);
 
@@ -633,7 +684,7 @@ describe("BeadsClient", () => {
     });
 
     it("returns not running on error", () => {
-      mockExecSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation(() => {
         throw new Error("command failed");
       });
 
@@ -645,13 +696,13 @@ describe("BeadsClient", () => {
 
   describe("isDaemonRunning", () => {
     it("returns true when daemon running", () => {
-      mockExecSync.mockReturnValue("✓ running (PID 12345)");
+      mockExecFileSync.mockReturnValue("✓ running (PID 12345)");
 
       expect(client.isDaemonRunning(testCwd)).toBe(true);
     });
 
     it("returns false when daemon stopped", () => {
-      mockExecSync.mockReturnValue("✗ stopped");
+      mockExecFileSync.mockReturnValue("✗ stopped");
 
       expect(client.isDaemonRunning(testCwd)).toBe(false);
     });
@@ -659,16 +710,12 @@ describe("BeadsClient", () => {
 
   describe("ensureDaemonWithSyncBranch", () => {
     it("configures sync branch and starts daemon when not running", () => {
-      // First call: configGet returns null (not set)
-      // Second call: daemonStatus returns stopped
-      // Then: configSet, daemonStart
-      let callCount = 0;
-      mockExecSync.mockImplementation((cmd: string) => {
-        callCount++;
-        if (cmd.includes("config get")) {
+      mockExecFileSync.mockImplementation((_cmd: unknown, args: unknown) => {
+        const argsArr = args as string[];
+        if (argsArr[0] === "config" && argsArr[1] === "get") {
           throw new Error("not set");
         }
-        if (cmd.includes("daemon status")) {
+        if (argsArr[0] === "daemon" && argsArr[1] === "status") {
           return "✗ stopped";
         }
         return "";
@@ -677,22 +724,25 @@ describe("BeadsClient", () => {
       client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
 
       // Should have called configSet and daemonStart
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd config set sync.branch beads-sync",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["config", "set", "sync.branch", "beads-sync"],
         expect.anything()
       );
-      expect(mockExecSync).toHaveBeenCalledWith(
-        "bd daemon start --auto-commit",
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        "bd",
+        ["daemon", "start", "--auto-commit"],
         expect.anything()
       );
     });
 
     it("skips configSet if sync branch already configured", () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("config get")) {
+      mockExecFileSync.mockImplementation((_cmd: unknown, args: unknown) => {
+        const argsArr = args as string[];
+        if (argsArr[0] === "config" && argsArr[1] === "get") {
           return "beads-sync";
         }
-        if (cmd.includes("daemon status")) {
+        if (argsArr[0] === "daemon" && argsArr[1] === "status") {
           return "✗ stopped";
         }
         return "";
@@ -701,18 +751,20 @@ describe("BeadsClient", () => {
       client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
 
       // Should NOT have called configSet
-      expect(mockExecSync).not.toHaveBeenCalledWith(
-        expect.stringContaining("config set"),
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        "bd",
+        expect.arrayContaining(["config", "set"]),
         expect.anything()
       );
     });
 
     it("skips daemonStart if already running", () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("config get")) {
+      mockExecFileSync.mockImplementation((_cmd: unknown, args: unknown) => {
+        const argsArr = args as string[];
+        if (argsArr[0] === "config" && argsArr[1] === "get") {
           return "beads-sync";
         }
-        if (cmd.includes("daemon status")) {
+        if (argsArr[0] === "daemon" && argsArr[1] === "status") {
           return "✓ running (PID 12345)";
         }
         return "";
@@ -721,8 +773,9 @@ describe("BeadsClient", () => {
       client.ensureDaemonWithSyncBranch(testCwd, "beads-sync");
 
       // Should NOT have called daemonStart
-      expect(mockExecSync).not.toHaveBeenCalledWith(
-        expect.stringContaining("daemon start"),
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        "bd",
+        expect.arrayContaining(["daemon", "start"]),
         expect.anything()
       );
     });

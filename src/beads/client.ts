@@ -3,9 +3,13 @@
  *
  * Wraps the `bd` CLI commands and returns typed results.
  * All methods require a `cwd` parameter to specify which project's beads to operate on.
+ *
+ * Uses execFileSync (no shell) to avoid metacharacter issues with descriptions
+ * containing newlines, quotes, backticks, etc. Descriptions are passed via
+ * --body-file - (stdin) to avoid ARG_MAX limits on large content.
  */
 
-import { execSync, type ExecSyncOptions } from "child_process";
+import { execFileSync } from "child_process";
 import type { Bead, BeadCreateOptions, BeadUpdateOptions, BeadListOptions, RawBead } from "./types.js";
 import { normalizeBead } from "./types.js";
 
@@ -13,16 +17,14 @@ export class BeadsClient {
   /**
    * Execute a bd command and return parsed JSON output
    */
-  private exec(args: string[], cwd: string): unknown {
-    const command = `bd ${args.join(" ")} --json`;
-    const options: ExecSyncOptions = {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    };
-
+  private exec(args: string[], cwd: string, stdin?: string): unknown {
     try {
-      const output = execSync(command, options) as string;
+      const output = execFileSync("bd", [...args, "--json"], {
+        cwd,
+        encoding: "utf-8",
+        stdio: [stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+        input: stdin,
+      });
       return JSON.parse(output.trim());
     } catch (error) {
       const err = error as Error & { stderr?: Buffer | string };
@@ -34,16 +36,14 @@ export class BeadsClient {
   /**
    * Execute a bd command without expecting JSON output
    */
-  private execRaw(args: string[], cwd: string): string {
-    const command = `bd ${args.join(" ")}`;
-    const options: ExecSyncOptions = {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    };
-
+  private execRaw(args: string[], cwd: string, stdin?: string): string {
     try {
-      return (execSync(command, options) as string).trim();
+      return execFileSync("bd", args, {
+        cwd,
+        encoding: "utf-8",
+        stdio: [stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+        input: stdin,
+      }).trim();
     } catch (error) {
       const err = error as Error & { stderr?: Buffer | string };
       const stderr = err.stderr?.toString() || err.message;
@@ -104,9 +104,12 @@ export class BeadsClient {
 
   /**
    * Create a new bead
+   *
+   * Descriptions are passed via --body-file - (stdin) to handle arbitrary
+   * content including newlines, quotes, backticks, and shell metacharacters.
    */
   create(title: string, cwd: string, options?: BeadCreateOptions): Bead {
-    const args = ["create", `"${this.escapeQuotes(title)}"`];
+    const args = ["create", title];
 
     if (options?.type) args.push("-t", options.type);
     if (options?.priority !== undefined) args.push("-p", String(options.priority));
@@ -117,11 +120,15 @@ export class BeadsClient {
         args.push("--label", label);
       }
     }
+
+    // Use --body-file - to pipe description via stdin
+    let stdin: string | undefined;
     if (options?.description) {
-      args.push("--description", `"${this.escapeQuotes(options.description)}"`);
+      args.push("--body-file", "-");
+      stdin = options.description;
     }
 
-    const raw = this.exec(args, cwd) as RawBead;
+    const raw = this.exec(args, cwd, stdin) as RawBead;
 
     // bd create doesn't return labels in JSON output, so fetch the full bead
     // Also handles non-open status via update if needed
@@ -139,12 +146,13 @@ export class BeadsClient {
 
   /**
    * Update a bead
+   *
+   * Descriptions are passed via --body-file - (stdin) to handle arbitrary content.
    */
   update(id: string, cwd: string, options: BeadUpdateOptions): Bead {
     const args = ["update", id];
 
-    if (options.title) args.push("--title", `"${this.escapeQuotes(options.title)}"`);
-    if (options.description) args.push("--description", `"${this.escapeQuotes(options.description)}"`);
+    if (options.title) args.push("--title", options.title);
     if (options.priority !== undefined) args.push("--priority", String(options.priority));
     if (options.status) args.push("--status", options.status);
     if (options.labelAdd?.length) {
@@ -158,8 +166,15 @@ export class BeadsClient {
       }
     }
 
+    // Use --body-file - to pipe description via stdin
+    let stdin: string | undefined;
+    if (options.description) {
+      args.push("--body-file", "-");
+      stdin = options.description;
+    }
+
     // bd update returns an array, extract first element
-    const raw = this.exec(args, cwd) as RawBead[];
+    const raw = this.exec(args, cwd, stdin) as RawBead[];
     return normalizeBead(raw[0]);
   }
 
@@ -167,7 +182,7 @@ export class BeadsClient {
    * Close a bead with a reason
    */
   close(id: string, reason: string, cwd: string): Bead {
-    const raw = this.exec(["close", id, "--reason", `"${this.escapeQuotes(reason)}"`], cwd) as RawBead[];
+    const raw = this.exec(["close", id, "--reason", reason], cwd) as RawBead[];
     return normalizeBead(raw[0]);
   }
 
@@ -175,7 +190,7 @@ export class BeadsClient {
    * Add a comment to a bead
    */
   comment(id: string, text: string, cwd: string): void {
-    this.execRaw(["comments", "add", id, `"${this.escapeQuotes(text)}"`], cwd);
+    this.execRaw(["comments", "add", id, text], cwd);
   }
 
   /**
@@ -405,13 +420,6 @@ export class BeadsClient {
   answerQuestion(questionId: string, answer: string, cwd: string): void {
     this.comment(questionId, `Answer: ${answer}`, cwd);
     this.close(questionId, "Answered", cwd);
-  }
-
-  /**
-   * Escape double quotes in strings for shell commands
-   */
-  private escapeQuotes(str: string): string {
-    return str.replace(/"/g, '\\"');
   }
 
   /**
