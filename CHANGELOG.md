@@ -5,6 +5,12 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.7] - 2026-02-15
+
+### Fixed
+- **Telegram bot crash kills entire dispatcher**: Grammy `bot.start()` polling errors (e.g., 409 Conflict from duplicate bot instances) were unhandled rejections that crashed the Node process. Now caught gracefully — Telegram degrades while the dispatcher continues
+- **Stale lock file blocks restart after crash**: Added `process.on('exit')` and `uncaughtException`/`unhandledRejection` handlers to always release the dispatcher lock file on unexpected crashes
+
 ## [0.13.6] - 2026-02-15
 
 ### Fixed
