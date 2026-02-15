@@ -1,6 +1,6 @@
 {
   "name": "while-humans-sleep",
-  "version": "0.13.7",
+  "version": "0.13.8",
   "description": "Multi-project AI agent dispatcher using Claude Agent SDK and Beads",
   "type": "module",
   "main": "dist/index.js",
