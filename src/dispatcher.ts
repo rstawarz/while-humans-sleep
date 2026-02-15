@@ -923,6 +923,17 @@ export class Dispatcher {
           const existing = getWorkflowForSource(name, bead.id);
           if (existing) continue;
 
+          // Skip epics that already have children — the children are the actual
+          // work items. Without this check, reopened epics get picked up as new
+          // work and spawn duplicate planner workflows.
+          if (bead.type === "epic") {
+            const children = beads.list(projectPath, { parent: bead.id });
+            if (children.length > 0) {
+              this.logger.log(`   Skipping epic ${name}/${bead.id} — has ${children.length} children`);
+              continue;
+            }
+          }
+
           items.push(this.beadToWorkItem(bead, name));
         }
       } catch (err) {

@@ -270,6 +270,35 @@ describe("Dispatcher E2E", () => {
       expect(mockNotifier.notifyProgress).toHaveBeenCalled();
     });
 
+    it("skips epics that already have children", async () => {
+      const { Dispatcher } = await import("./dispatcher.js");
+
+      const epicBead = {
+        id: "bd-epic-1",
+        title: "UX Redesign Phase 2",
+        description: "Persistent navigation",
+        priority: 2,
+        type: "epic",
+        status: "open",
+        dependencies: [],
+      };
+
+      mockBeads.ready.mockReturnValue([epicBead]);
+      // Epic already has children — should be skipped
+      mockBeads.list.mockReturnValue([
+        { id: "bd-epic-1.1", title: "Story 1", status: "open" },
+        { id: "bd-epic-1.2", title: "Story 2", status: "in_progress" },
+      ]);
+
+      const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
+      await (dispatcher as any).tick();
+      await flushPromises();
+
+      // Should NOT start a workflow for the epic
+      expect(mockWorkflow.startWorkflow).not.toHaveBeenCalled();
+    });
+
     it("completes workflow on DONE handoff", async () => {
       const { Dispatcher } = await import("./dispatcher.js");
 
