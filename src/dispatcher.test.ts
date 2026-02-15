@@ -285,6 +285,13 @@ describe("Dispatcher E2E", () => {
         beadId: "bd-123",
       });
 
+      // Source bead has no children — safe to close
+      mockBeads.list.mockReturnValue([]);
+      mockBeads.show.mockReturnValue({
+        id: "bd-123",
+        status: "closed",
+      });
+
       mockAgentRunnerInstance.run.mockResolvedValue({
         sessionId: "session-123",
         output: "All done!",
@@ -311,14 +318,82 @@ describe("Dispatcher E2E", () => {
         "PR merged successfully."
       );
 
-      // Verify source bead was closed
+      // Verify source bead was closed (no open children)
       expect(mockBeads.close).toHaveBeenCalledWith(
         "bd-123",
         "Completed by WHS workflow",
         "/home/user/work/test-project"
       );
 
+      // Verify worktree was cleaned up
+      expect(mockWorktree.removeWorktree).toHaveBeenCalledWith(
+        "test-project",
+        "bd-123",
+        { force: true }
+      );
+
       // Verify notifier was called
+      expect(mockNotifier.notifyComplete).toHaveBeenCalledWith(
+        expect.any(Object),
+        "done"
+      );
+    });
+
+    it("does NOT close source bead when it has open children", async () => {
+      const { Dispatcher } = await import("./dispatcher.js");
+
+      mockBeads.ready.mockReturnValue([testBead]);
+      mockWorkflow.startWorkflow.mockResolvedValue({
+        epicId: "bd-w001",
+        stepId: "bd-w001.1",
+      });
+
+      mockWorkflow.getSourceBeadInfo.mockReturnValue({
+        project: "test-project",
+        beadId: "bd-epic-1",
+      });
+
+      // Source bead is an epic with open children (e.g., planner created stories)
+      mockBeads.list.mockReturnValue([
+        { id: "bd-epic-1.1", title: "Story 1", status: "open" },
+        { id: "bd-epic-1.2", title: "Story 2", status: "open" },
+        { id: "bd-epic-1.3", title: "Story 3", status: "closed" },
+      ]);
+      mockBeads.show.mockReturnValue({
+        id: "bd-epic-1",
+        status: "open",
+      });
+
+      mockAgentRunnerInstance.run.mockResolvedValue({
+        sessionId: "session-123",
+        output: "Planning complete!",
+        costUsd: 0.03,
+      });
+
+      mockHandoff.getHandoff.mockResolvedValue({
+        next_agent: "DONE",
+        context: "Planning complete, stories created.",
+      });
+
+      const dispatcher = new Dispatcher(testConfig, mockNotifier);
+      (dispatcher as any).running = true;
+      await (dispatcher as any).tick();
+      await flushPromises();
+
+      // Verify workflow was completed in orchestrator
+      expect(mockWorkflow.completeWorkflow).toHaveBeenCalledWith(
+        "bd-w001",
+        "done",
+        "Planning complete, stories created."
+      );
+
+      // Source bead should NOT be closed — it has open children
+      expect(mockBeads.close).not.toHaveBeenCalled();
+
+      // Worktree should NOT be cleaned up — epic still has work to do
+      expect(mockWorktree.removeWorktree).not.toHaveBeenCalled();
+
+      // Notifier should still be called
       expect(mockNotifier.notifyComplete).toHaveBeenCalledWith(
         expect.any(Object),
         "done"

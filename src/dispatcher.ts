@@ -1390,26 +1390,48 @@ export class Dispatcher {
       return;
     }
 
-    // Close the source bead in the project
+    // Close the source bead in the project — but only if it has no open children.
+    // Epics with open children (e.g., a planner created stories) should stay open
+    // so the children get picked up as separate work items.
     const project = this.projects.get(sourceInfo.project);
     if (project) {
+      const projectPath = expandPath(project.repoPath);
       try {
-        beads.close(
-          sourceInfo.beadId,
-          `Completed by WHS workflow`,
-          expandPath(project.repoPath)
+        const children = beads.list(projectPath, { parent: sourceInfo.beadId });
+        const openChildren = children.filter(
+          (c) => c.status !== "closed" && c.status !== "tombstone"
         );
-        this.logger.log(`   Closed source bead: ${sourceInfo.project}/${sourceInfo.beadId}`);
+
+        if (openChildren.length > 0) {
+          this.logger.log(
+            `   Source bead ${sourceInfo.project}/${sourceInfo.beadId} has ${openChildren.length} open children — keeping open`
+          );
+        } else {
+          beads.close(
+            sourceInfo.beadId,
+            `Completed by WHS workflow`,
+            projectPath
+          );
+          this.logger.log(`   Closed source bead: ${sourceInfo.project}/${sourceInfo.beadId}`);
+        }
       } catch (err) {
         this.logger.warn(`Failed to close source bead ${sourceInfo.beadId}: ${err}`);
       }
     }
 
     // Clean up worktree (branch is named after the source bead ID, not the step ID)
-    try {
-      removeWorktree(sourceInfo.project, sourceInfo.beadId, { force: true });
-    } catch (err) {
-      this.logger.warn(`Failed to remove worktree ${sourceInfo.project}/${sourceInfo.beadId}: ${err}`);
+    // Only clean up if the source bead was closed (no open children)
+    const sourceBead = project
+      ? beads.show(sourceInfo.beadId, expandPath(project.repoPath))
+      : null;
+    if (!sourceBead || sourceBead.status === "closed") {
+      try {
+        removeWorktree(sourceInfo.project, sourceInfo.beadId, { force: true });
+      } catch (err) {
+        this.logger.warn(`Failed to remove worktree ${sourceInfo.project}/${sourceInfo.beadId}: ${err}`);
+      }
+    } else {
+      this.logger.log(`   Keeping worktree for ${sourceInfo.project}/${sourceInfo.beadId} (open children remain)`);
     }
 
     await this.notifier.notifyComplete(work, "done");
