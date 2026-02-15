@@ -149,14 +149,15 @@ program
 program
   .command("doctor")
   .description("Check system health before starting")
-  .action(async () => {
+  .option("--auth", "Include Claude authentication check (slow)")
+  .action(async (options: { auth?: boolean }) => {
     if (!requireOrchestrator()) {
       process.exit(1);
     }
 
     const { runDoctorChecks, formatDoctorResults } = await import("./doctor.js");
     const config = loadConfig();
-    const checks = await runDoctorChecks(config);
+    const checks = await runDoctorChecks(config, { auth: options.auth });
     console.log(formatDoctorResults(checks));
 
     const hasFail = checks.some((c) => c.status === "fail");

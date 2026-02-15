@@ -524,8 +524,28 @@ describe("formatDoctorResults", () => {
 });
 
 describe("runDoctorChecks", () => {
-  it("runs all checks and returns results", async () => {
-    // Set up minimal mocks for all checks to pass
+  it("runs all checks except auth by default", async () => {
+    vi.mocked(beads.daemonStatus).mockReturnValue({ running: true, pid: 123 });
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(getErroredWorkflows).mockReturnValue([]);
+    vi.mocked(beads.list).mockReturnValue([]);
+    vi.mocked(getStepsPendingCI).mockReturnValue([]);
+    vi.mocked(listWorktrees).mockReturnValue([]);
+    vi.mocked(loadState).mockReturnValue({
+      activeWork: new Map(),
+      paused: false,
+      lastUpdated: new Date(),
+    });
+    vi.mocked(getLockInfo).mockReturnValue(null);
+
+    const results = await runDoctorChecks(mockConfig);
+
+    expect(results).toHaveLength(7);
+    expect(results.every((r) => r.status === "pass")).toBe(true);
+    expect(results.find((r) => r.name === "Claude auth")).toBeUndefined();
+  });
+
+  it("includes auth check when auth option is true", async () => {
     vi.mocked(execSync)
       .mockReturnValueOnce("/usr/local/bin/claude")  // which claude
       .mockReturnValueOnce("OK");                     // claude --print
@@ -542,9 +562,10 @@ describe("runDoctorChecks", () => {
     });
     vi.mocked(getLockInfo).mockReturnValue(null);
 
-    const results = await runDoctorChecks(mockConfig);
+    const results = await runDoctorChecks(mockConfig, { auth: true });
 
     expect(results).toHaveLength(8);
     expect(results.every((r) => r.status === "pass")).toBe(true);
+    expect(results[0].name).toBe("Claude auth");
   });
 });

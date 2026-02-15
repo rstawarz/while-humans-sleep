@@ -27,13 +27,20 @@ export interface DoctorCheck {
   details?: string[];
 }
 
+export interface DoctorOptions {
+  /** Include the Claude auth check (slow — calls claude --print). Default: false */
+  auth?: boolean;
+}
+
 /**
  * Runs all doctor checks and returns results
  */
-export async function runDoctorChecks(config: Config): Promise<DoctorCheck[]> {
+export async function runDoctorChecks(config: Config, options: DoctorOptions = {}): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
 
-  checks.push(checkClaudeAuth(config));
+  if (options.auth) {
+    checks.push(checkClaudeAuth(config));
+  }
   checks.push(checkBeadsDaemons(config));
   checks.push(checkDaemonErrors(config));
   checks.push(checkErroredWorkflows());
