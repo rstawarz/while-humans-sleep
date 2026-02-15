@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-02-15
+
+### Fixed
+- **CLI session resume always fails for question answers**: `claude --resume` treats stdin as a new user message, not as a tool result for the pending `AskUserQuestion`. Every question-answer flow wasted time on a doomed resume attempt before falling back. Now `CLIAgentRunner.resumeWithAnswer()` returns immediately, and the fallback prompt includes both the original questions and the answer for better agent context
+
 ## [0.13.0] - 2026-02-12
 
 ### Added
