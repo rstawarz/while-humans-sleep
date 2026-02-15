@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-02-15
+
+### Added
+- **`whs advance` infers `--next-agent`**: The `--next-agent` flag is now optional. When omitted, the next agent is inferred from the workflow state machine based on the last step that ran (e.g., `implementation` → `quality_review` → `release_manager` → `DONE`). Doctor hints simplified accordingly
+
 ## [0.14.2] - 2026-02-15
 
 ### Changed
