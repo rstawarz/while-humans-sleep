@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.6] - 2026-02-15
+
+### Fixed
+- **`whs retry` fails with UNIQUE constraint on step_runs**: Retrying a workflow reuses the same step ID, but `recordStepStart` used `INSERT INTO` which fails on duplicate keys. Now uses `INSERT OR REPLACE` to handle retried steps
+
 ## [0.13.5] - 2026-02-15
 
 ### Added
