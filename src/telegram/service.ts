@@ -139,8 +139,14 @@ export class TelegramService implements Notifier {
 
     this.running = true;
 
-    // Start the bot (long polling)
-    this.bot.start();
+    // Start the bot (long polling).
+    // Catch polling-level errors (e.g., 409 Conflict from duplicate bot instances)
+    // so they don't crash the entire dispatcher process.
+    this.bot.start().catch((err) => {
+      console.error("[Telegram] Bot polling crashed:", err.message || err);
+      console.error("[Telegram] Telegram notifications are unavailable. Dispatcher continues without them.");
+      this.running = false;
+    });
 
     // Start polling for questions to send
     this.pollTimer = setInterval(() => {

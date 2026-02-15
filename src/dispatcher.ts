@@ -128,6 +128,23 @@ export class Dispatcher {
       throw new Error("Failed to acquire lock");
     }
 
+    // Ensure lock is released on unexpected crashes (unhandled exceptions,
+    // signals, etc.) so a stale lock doesn't block the next start.
+    const cleanupLock = (): void => {
+      try { releaseLock(); } catch { /* best effort */ }
+    };
+    process.on("exit", cleanupLock);
+    process.on("uncaughtException", (err) => {
+      this.logger.error(`💥 Uncaught exception: ${err.message}`);
+      cleanupLock();
+      process.exit(1);
+    });
+    process.on("unhandledRejection", (reason) => {
+      this.logger.error(`💥 Unhandled rejection: ${reason}`);
+      cleanupLock();
+      process.exit(1);
+    });
+
     // Only intercept raw stdout/stderr when using ConsoleLogger.
     // In TUI mode, ink owns stdout for rendering — intercepting it
     // breaks ink's cursor management and causes duplicate panels.
