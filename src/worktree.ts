@@ -129,11 +129,27 @@ export function ensureWorktree(
     return existing.path;
   }
 
+  // Fetch origin before creating worktree to ensure we branch from
+  // the latest remote state. Without this, worktrees created from a
+  // stale local branch will be missing merged dependency PRs.
+  try {
+    execSync("git fetch origin", {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 30000,
+      stdio: "pipe",
+    });
+  } catch {
+    // Non-fatal — continue with local state if fetch fails (e.g., offline)
+  }
+
   // Create new worktree with branch — if the branch already exists
   // (e.g., from a previous agent run), switch to it without --create
   const createArgs = ["switch", "--create", beadId];
   if (options?.baseBranch) {
-    createArgs.push("--base", options.baseBranch);
+    // Use origin/<baseBranch> to ensure we branch from the remote ref,
+    // not the (potentially stale) local branch
+    createArgs.push("--base", `origin/${options.baseBranch}`);
   }
 
   try {
