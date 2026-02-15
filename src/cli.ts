@@ -1469,6 +1469,61 @@ program
   });
 
 program
+  .command("backlog [project]")
+  .description("Show project backlog with workflow state overlay")
+  .option("-a, --all", "Include closed beads")
+  .action(async (projectName: string | undefined, options: { all?: boolean }) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { getBacklogData, formatBacklog } = await import("./backlog.js");
+
+    if (projectName) {
+      // Show backlog for a single project
+      const project = getProject(projectName);
+      if (!project) {
+        console.error(`Error: Project "${projectName}" not found.`);
+        console.error("Use 'whs list' to see configured projects.");
+        process.exit(1);
+      }
+
+      try {
+        const data = getBacklogData(projectName, { includeAll: options.all });
+        console.log("");
+        console.log(formatBacklog(data));
+        console.log("");
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    } else {
+      // Show backlog for all projects
+      const config = loadConfig();
+      if (config.projects.length === 0) {
+        console.error("No projects configured.");
+        console.error("Run 'whs add <path>' to add a project.");
+        process.exit(1);
+      }
+
+      let first = true;
+      for (const project of config.projects) {
+        if (!first) console.log("");
+        first = false;
+
+        try {
+          const data = getBacklogData(project.name, { includeAll: options.all });
+          console.log("");
+          console.log(formatBacklog(data));
+        } catch (err) {
+          console.error(`\n${project.name}: Error — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      console.log("");
+    }
+  });
+
+program
   .command("pause")
   .description("Pause the dispatcher (running agents finish, no new work picked up)")
   .action(async () => {
