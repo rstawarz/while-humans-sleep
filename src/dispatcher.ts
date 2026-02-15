@@ -949,7 +949,6 @@ export class Dispatcher {
           if (bead.type === "epic") {
             const children = beads.list(projectPath, { parent: bead.id });
             if (children.length > 0) {
-              this.logger.log(`   Skipping epic ${name}/${bead.id} — has ${children.length} children`);
               continue;
             }
           }
