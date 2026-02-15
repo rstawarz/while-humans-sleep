@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-02-15
+
+### Added
+- **`whs backlog [project]` command**: Visualize project backlog as an indented tree with workflow state overlay. Shows status icons (✅🔄🚫⏳❓), PR/CI annotations, blocked-by dependencies, and active agent info. Use `--all` to include closed beads, omit project arg to show all projects
+
 ## [0.13.11] - 2026-02-15
 
 ### Changed
