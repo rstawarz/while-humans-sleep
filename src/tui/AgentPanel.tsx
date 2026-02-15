@@ -57,19 +57,14 @@ export function AgentPanel({
     );
   }
 
-  if (active.length === 0) {
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        <Text bold>{"  Active Agents (0/" + maxTotal + ")"}</Text>
-        <Text dimColor>{"  Waiting for ready work"}</Text>
-      </Box>
-    );
-  }
+  const hasCI = pendingCI.length > 0;
+  const hasQuestions = pendingQuestionCount > 0;
+  const idle = active.length === 0 && !hasCI && !hasQuestions;
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text bold>{"  Active Agents (" + active.length + "/" + maxTotal + ")"}</Text>
-      <Text>{""}</Text>
+      {active.length > 0 && <Text>{""}</Text>}
       {active.map((work) => {
         const duration = formatDuration(work.startedAt);
         const cost = "$" + work.costSoFar.toFixed(2);
@@ -90,15 +85,18 @@ export function AgentPanel({
           </Box>
         );
       })}
-      {pendingCI.length > 0 && pendingCI.map((ci, i) => (
+      {hasCI && pendingCI.map((ci, i) => (
         <Text key={"ci-" + i} color="cyan">
-          {"  \u23F3 PR #" + ci.prNumber + " \u2014 CI running (" + ci.stepId + ", " + ci.sourceBeadId + ") - " + ci.title}
+          {"  \u23F3 PR #" + ci.prNumber + " \u2014 CI running (" + ci.project + "/" + ci.sourceBeadId + ") - " + ci.title}
         </Text>
       ))}
-      {pendingQuestionCount > 0 && (
+      {hasQuestions && (
         <Text color="yellow">
           {"  \u2753 " + pendingQuestionCount + " pending question" + (pendingQuestionCount > 1 ? "s" : "")}
         </Text>
+      )}
+      {idle && (
+        <Text dimColor>{"  Waiting for ready work"}</Text>
       )}
     </Box>
   );
