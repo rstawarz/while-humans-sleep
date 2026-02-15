@@ -208,8 +208,9 @@ export function recordStepStart(
   `);
   ensureWorkflow.run(workflowId, new Date().toISOString());
 
+  // INSERT OR REPLACE handles retried steps that reuse the same step ID
   const stmt = database.prepare(`
-    INSERT INTO step_runs (id, workflow_id, agent, started_at, cost)
+    INSERT OR REPLACE INTO step_runs (id, workflow_id, agent, started_at, cost)
     VALUES (?, ?, ?, ?, 0)
   `);
   stmt.run(id, workflowId, agent, new Date().toISOString());
