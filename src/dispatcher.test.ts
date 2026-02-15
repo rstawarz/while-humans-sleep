@@ -952,6 +952,7 @@ describe("Dispatcher E2E", () => {
         paused: false,
         startedAt: expect.any(Date),
         todayCost: expect.any(Number),
+        pendingCI: [],
       });
     });
   });

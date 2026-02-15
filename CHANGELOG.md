@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.9] - 2026-02-15
+
+### Added
+- **CI-pending status in TUI dashboard**: Steps waiting for CI now appear in the bottom panel as "Waiting for CI: PR #X (project)" so you can see at a glance what's pending without scrolling through logs
+
 ## [0.13.8] - 2026-02-15
 
 ### Fixed

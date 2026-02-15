@@ -11,12 +11,19 @@ interface AgentActivity {
   summary: string;
 }
 
+interface PendingCIInfo {
+  project: string;
+  prNumber: number;
+  agent: string;
+}
+
 interface AgentPanelProps {
   active: ActiveWork[];
   maxTotal: number;
   pendingQuestionCount: number;
   paused: boolean;
   agentActivity: Map<string, AgentActivity>;
+  pendingCI: PendingCIInfo[];
 }
 
 function formatDuration(startedAt: Date): string {
@@ -35,6 +42,7 @@ export function AgentPanel({
   pendingQuestionCount,
   paused,
   agentActivity,
+  pendingCI,
 }: AgentPanelProps): React.ReactElement {
   if (paused) {
     return (
@@ -79,6 +87,11 @@ export function AgentPanel({
           </Box>
         );
       })}
+      {pendingCI.length > 0 && pendingCI.map((ci, i) => (
+        <Text key={"ci-" + i} color="cyan">
+          {"  \u23F3 Waiting for CI: PR #" + ci.prNumber + " (" + ci.project + ")"}
+        </Text>
+      ))}
       {pendingQuestionCount > 0 && (
         <Text color="yellow">
           {"  \u2753 " + pendingQuestionCount + " pending question" + (pendingQuestionCount > 1 ? "s" : "")}

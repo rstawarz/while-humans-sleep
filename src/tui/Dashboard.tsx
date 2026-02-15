@@ -65,6 +65,7 @@ export function Dashboard({ dispatcher, logger, maxTotal }: DashboardProps): Rea
   const [startedAt, setStartedAt] = useState(new Date());
   const [todayCost, setTodayCost] = useState(0);
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivity>>(new Map());
+  const [pendingCI, setPendingCI] = useState<{ project: string; prNumber: number; agent: string }[]>([]);
 
   // Subscribe to new log entries
   useEffect(() => {
@@ -83,6 +84,7 @@ export function Dashboard({ dispatcher, logger, maxTotal }: DashboardProps): Rea
         setPaused(status.paused);
         setStartedAt(status.startedAt);
         setTodayCost(status.todayCost);
+        setPendingCI(status.pendingCI);
 
         // Read latest activity for each active agent
         const activity = new Map<string, AgentActivity>();
@@ -131,6 +133,7 @@ export function Dashboard({ dispatcher, logger, maxTotal }: DashboardProps): Rea
           pendingQuestionCount={pendingQuestionCount}
           paused={paused}
           agentActivity={agentActivity}
+          pendingCI={pendingCI}
         />
       </Box>
     </Box>
