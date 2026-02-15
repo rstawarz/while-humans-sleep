@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import type { Config } from "./types.js";
-import { expandPath } from "./config.js";
+import { expandPath, loadWhsEnv } from "./config.js";
 import { beads } from "./beads/index.js";
 import {
   getErroredWorkflows,
@@ -33,6 +33,7 @@ export interface DoctorCheck {
 export async function runDoctorChecks(config: Config): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
 
+  checks.push(checkClaudeAuth(config));
   checks.push(checkBeadsDaemons(config));
   checks.push(checkDaemonErrors(config));
   checks.push(checkErroredWorkflows());
@@ -45,7 +46,89 @@ export async function runDoctorChecks(config: Config): Promise<DoctorCheck[]> {
 }
 
 /**
- * Check 1: Beads daemons running for all projects + orchestrator
+ * Check 1: Claude authentication
+ *
+ * For CLI runner: verifies `claude` is in PATH and responds to a simple prompt.
+ * For SDK runner: verifies ANTHROPIC_API_KEY is available.
+ */
+export function checkClaudeAuth(config: Config): DoctorCheck {
+  const runnerType = config.runnerType || "cli";
+
+  if (runnerType === "sdk") {
+    const env = loadWhsEnv(expandPath(config.orchestratorPath));
+    if (env.ANTHROPIC_API_KEY) {
+      return {
+        name: "Claude auth",
+        status: "pass",
+        message: `SDK — API key set`,
+      };
+    }
+
+    return {
+      name: "Claude auth",
+      status: "fail",
+      message: "SDK — no API key found",
+      details: [
+        "Set ANTHROPIC_API_KEY in ~/.whs/.env or run 'whs claude-login'",
+      ],
+    };
+  }
+
+  // CLI runner — check claude binary and auth
+  try {
+    execSync("which claude", { encoding: "utf-8", timeout: 5000 });
+  } catch {
+    return {
+      name: "Claude auth",
+      status: "fail",
+      message: "CLI — 'claude' not found in PATH",
+      details: ["Install Claude Code: https://claude.com/claude-code"],
+    };
+  }
+
+  try {
+    const output = execSync(
+      'claude --print "Respond with exactly: OK"',
+      { encoding: "utf-8", timeout: 30000 }
+    ).trim();
+
+    if (output.includes("OK")) {
+      return {
+        name: "Claude auth",
+        status: "pass",
+        message: "CLI — authenticated",
+      };
+    }
+
+    return {
+      name: "Claude auth",
+      status: "warn",
+      message: "CLI — unexpected response",
+      details: [`Expected 'OK', got: ${output.slice(0, 100)}`],
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const isAuth =
+      /unauthorized|auth|login|token.*expired|oauth/i.test(message);
+
+    return {
+      name: "Claude auth",
+      status: "fail",
+      message: isAuth
+        ? "CLI — authentication failed"
+        : "CLI — failed to run claude",
+      details: [
+        message.slice(0, 200),
+        ...(isAuth
+          ? ["Run 'whs claude-login' or 'claude /login' to re-authenticate"]
+          : []),
+      ],
+    };
+  }
+}
+
+/**
+ * Check 2: Beads daemons running for all projects + orchestrator
  */
 export function checkBeadsDaemons(config: Config): DoctorCheck {
   const notRunning: string[] = [];

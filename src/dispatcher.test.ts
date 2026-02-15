@@ -135,6 +135,14 @@ vi.mock("./agent-log.js", () => ({
   cleanAllLogs: vi.fn(),
 }));
 
+vi.mock("./doctor.js", () => ({
+  checkClaudeAuth: vi.fn(() => ({
+    name: "Claude auth",
+    status: "pass",
+    message: "CLI — authenticated",
+  })),
+}));
+
 // Helper to wait for async operations to complete
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -1682,93 +1690,68 @@ describe("Preflight check", () => {
     };
   });
 
-  it("runPreflightCheck succeeds on valid auth", async () => {
+  it("runPreflightCheck succeeds when checkClaudeAuth passes", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
+    const { checkClaudeAuth } = await import("./doctor.js");
 
-    mockAgentRunnerInstance.run.mockResolvedValue({
-      sessionId: "preflight-session",
-      output: "PREFLIGHT_OK",
-      costUsd: 0.001,
-      turns: 1,
-      durationMs: 500,
-      success: true,
+    vi.mocked(checkClaudeAuth).mockReturnValue({
+      name: "Claude auth",
+      status: "pass",
+      message: "CLI — authenticated",
     });
 
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
     await expect(dispatcher.runPreflightCheck()).resolves.toBeUndefined();
 
-    expect(mockAgentRunnerInstance.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: "Respond with exactly: PREFLIGHT_OK",
-        maxTurns: 1,
-      })
-    );
+    expect(checkClaudeAuth).toHaveBeenCalledWith(testConfig);
   });
 
   it("runPreflightCheck throws on auth failure", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
+    const { checkClaudeAuth } = await import("./doctor.js");
 
-    mockAgentRunnerInstance.run.mockResolvedValue({
-      sessionId: "",
-      output: "",
-      costUsd: 0,
-      turns: 0,
-      durationMs: 100,
-      success: false,
-      isAuthError: true,
-      error: "OAuth token expired",
+    vi.mocked(checkClaudeAuth).mockReturnValue({
+      name: "Claude auth",
+      status: "fail",
+      message: "CLI — authentication failed",
+      details: ["unauthorized: token expired"],
     });
 
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
-    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Authentication failed");
+    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("unauthorized: token expired");
   });
 
-  it("runPreflightCheck throws on generic failure", async () => {
+  it("runPreflightCheck throws on claude not found", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
+    const { checkClaudeAuth } = await import("./doctor.js");
 
-    mockAgentRunnerInstance.run.mockResolvedValue({
-      sessionId: "",
-      output: "",
-      costUsd: 0,
-      turns: 0,
-      durationMs: 100,
-      success: false,
-      error: "Connection refused",
+    vi.mocked(checkClaudeAuth).mockReturnValue({
+      name: "Claude auth",
+      status: "fail",
+      message: "CLI — 'claude' not found in PATH",
     });
 
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
-    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Preflight check failed");
-  });
-
-  it("runPreflightCheck throws when agent runner throws", async () => {
-    const { Dispatcher } = await import("./dispatcher.js");
-
-    mockAgentRunnerInstance.run.mockRejectedValue(new Error("Network timeout"));
-
-    const dispatcher = new Dispatcher(testConfig, mockNotifier);
-    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("Network timeout");
+    await expect(dispatcher.runPreflightCheck()).rejects.toThrow("not found in PATH");
   });
 
   it("start() releases lock on preflight failure", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
+    const { checkClaudeAuth } = await import("./doctor.js");
 
     mockState.getLockInfo.mockReturnValue(null);
     mockState.acquireLock.mockReturnValue(true);
 
-    mockAgentRunnerInstance.run.mockResolvedValue({
-      sessionId: "",
-      output: "",
-      costUsd: 0,
-      turns: 0,
-      durationMs: 100,
-      success: false,
-      isAuthError: true,
-      error: "OAuth token expired",
+    vi.mocked(checkClaudeAuth).mockReturnValue({
+      name: "Claude auth",
+      status: "fail",
+      message: "CLI — authentication failed",
+      details: ["OAuth token expired"],
     });
 
     const dispatcher = new Dispatcher(testConfig, mockNotifier);
 
-    await expect(dispatcher.start()).rejects.toThrow("Authentication failed");
+    await expect(dispatcher.start()).rejects.toThrow("OAuth token expired");
     expect(mockState.releaseLock).toHaveBeenCalled();
   });
 
@@ -1909,17 +1892,16 @@ describe("Errored workflow recovery", () => {
 
   it("recoverErroredWorkflows is called after preflight on start", async () => {
     const { Dispatcher } = await import("./dispatcher.js");
+    const { checkClaudeAuth } = await import("./doctor.js");
 
     mockState.getLockInfo.mockReturnValue(null);
     mockState.acquireLock.mockReturnValue(true);
 
-    // Preflight succeeds
-    mockAgentRunnerInstance.run.mockResolvedValue({
-      sessionId: "preflight",
-      output: "PREFLIGHT_OK",
-      costUsd: 0.001,
-      turns: 1,
-      success: true,
+    // Preflight passes
+    vi.mocked(checkClaudeAuth).mockReturnValue({
+      name: "Claude auth",
+      status: "pass",
+      message: "CLI — authenticated",
     });
 
     // One errored workflow to recover

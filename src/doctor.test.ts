@@ -13,6 +13,7 @@ vi.mock("./config.js", () => ({
   loadConfig: vi.fn(),
   getConfigDir: vi.fn(() => "/tmp/test-whs"),
   findConfigDir: vi.fn(() => "/tmp/test-whs"),
+  loadWhsEnv: vi.fn(() => ({})),
 }));
 
 vi.mock("./workflow.js", () => ({
@@ -51,7 +52,9 @@ import { loadState, getLockInfo } from "./state.js";
 import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
 import type { Config } from "./types.js";
+import { loadWhsEnv } from "./config.js";
 import {
+  checkClaudeAuth,
   checkBeadsDaemons,
   checkDaemonErrors,
   checkErroredWorkflows,
@@ -88,6 +91,67 @@ const mockConfig: Config = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("checkClaudeAuth", () => {
+  it("passes for CLI runner when claude responds OK", () => {
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/usr/local/bin/claude")  // which claude
+      .mockReturnValueOnce("OK");                     // claude --print
+
+    const result = checkClaudeAuth(mockConfig);
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("CLI");
+    expect(result.message).toContain("authenticated");
+  });
+
+  it("fails for CLI runner when claude not in PATH", () => {
+    vi.mocked(execSync).mockImplementation(() => {
+      throw new Error("not found");
+    });
+
+    const result = checkClaudeAuth(mockConfig);
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("not found in PATH");
+  });
+
+  it("fails for CLI runner on auth error", () => {
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/usr/local/bin/claude")  // which claude
+      .mockImplementationOnce(() => {                  // claude --print
+        throw new Error("unauthorized: token expired");
+      });
+
+    const result = checkClaudeAuth(mockConfig);
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("authentication failed");
+  });
+
+  it("passes for SDK runner when API key is set", () => {
+    vi.mocked(loadWhsEnv).mockReturnValue({
+      ANTHROPIC_API_KEY: "sk-ant-test123",
+    });
+
+    const sdkConfig = { ...mockConfig, runnerType: "sdk" as const };
+    const result = checkClaudeAuth(sdkConfig);
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("SDK");
+    expect(result.message).toContain("API key set");
+  });
+
+  it("fails for SDK runner when no API key", () => {
+    vi.mocked(loadWhsEnv).mockReturnValue({});
+
+    const sdkConfig = { ...mockConfig, runnerType: "sdk" as const };
+    const result = checkClaudeAuth(sdkConfig);
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("no API key");
+  });
 });
 
 describe("checkBeadsDaemons", () => {
@@ -462,6 +526,9 @@ describe("formatDoctorResults", () => {
 describe("runDoctorChecks", () => {
   it("runs all checks and returns results", async () => {
     // Set up minimal mocks for all checks to pass
+    vi.mocked(execSync)
+      .mockReturnValueOnce("/usr/local/bin/claude")  // which claude
+      .mockReturnValueOnce("OK");                     // claude --print
     vi.mocked(beads.daemonStatus).mockReturnValue({ running: true, pid: 123 });
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(getErroredWorkflows).mockReturnValue([]);
@@ -477,7 +544,7 @@ describe("runDoctorChecks", () => {
 
     const results = await runDoctorChecks(mockConfig);
 
-    expect(results).toHaveLength(7);
+    expect(results).toHaveLength(8);
     expect(results.every((r) => r.status === "pass")).toBe(true);
   });
 });

@@ -68,6 +68,7 @@ import {
   getTodayCost,
 } from "./metrics.js";
 import { logAgentEvent, cleanAllLogs } from "./agent-log.js";
+import { checkClaudeAuth } from "./doctor.js";
 import type { Bead } from "./beads/types.js";
 import type { Logger } from "./logger.js";
 import { ConsoleLogger } from "./logger.js";
@@ -405,24 +406,23 @@ export class Dispatcher {
    *
    * Called before the tick loop on start(), and after resume() before the
    * first tick. Throws on failure — caller decides how to handle it.
+   *
+   * Uses the same checkClaudeAuth() as `whs doctor` so both report
+   * consistently on authentication status.
    */
   async runPreflightCheck(): Promise<void> {
     this.logger.log("🔍 Running preflight check...");
 
-    const orchestratorPath = expandPath(this.config.orchestratorPath);
+    const result = checkClaudeAuth(this.config);
 
-    const result = await this.agentRunner.run({
-      prompt: "Respond with exactly: PREFLIGHT_OK",
-      cwd: orchestratorPath,
-      maxTurns: 1,
-    });
-
-    if (result.isAuthError) {
-      throw new Error(`Authentication failed: ${result.error || "unknown auth error"}`);
+    if (result.status === "fail") {
+      throw new Error(
+        result.details?.[0] || result.message
+      );
     }
 
-    if (!result.success) {
-      throw new Error(`Preflight check failed: ${result.error || "agent returned unsuccessful result"}`);
+    if (result.status === "warn") {
+      this.logger.warn(`⚠️  Preflight warning: ${result.message}`);
     }
 
     this.logger.log("✅ Preflight check passed");
