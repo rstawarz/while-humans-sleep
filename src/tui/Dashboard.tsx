@@ -65,7 +65,7 @@ export function Dashboard({ dispatcher, logger, maxTotal }: DashboardProps): Rea
   const [startedAt, setStartedAt] = useState(new Date());
   const [todayCost, setTodayCost] = useState(0);
   const [agentActivity, setAgentActivity] = useState<Map<string, AgentActivity>>(new Map());
-  const [pendingCI, setPendingCI] = useState<{ project: string; prNumber: number; agent: string }[]>([]);
+  const [pendingCI, setPendingCI] = useState<{ project: string; prNumber: number; agent: string; stepId: string; sourceBeadId: string; title: string }[]>([]);
 
   // Subscribe to new log entries
   useEffect(() => {

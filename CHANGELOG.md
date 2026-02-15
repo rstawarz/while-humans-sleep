@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.11] - 2026-02-15
+
+### Changed
+- **TUI CI-pending shows full context**: CI-pending line now shows `PR #172 — CI running (orc-9pf.5, bread_and_butter-72i.4) - Batch-Migrate Food and Utility Pages` with the orchestrator step ID, source bead ID, and task title
+
 ## [0.13.10] - 2026-02-15
 
 ### Changed

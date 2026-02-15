@@ -1619,7 +1619,7 @@ export class Dispatcher {
     paused: boolean;
     startedAt: Date;
     todayCost: number;
-    pendingCI: { project: string; prNumber: number; agent: string }[];
+    pendingCI: { project: string; prNumber: number; agent: string; stepId: string; sourceBeadId: string; title: string }[];
   } {
     const orchestratorPath = expandPath(this.config.orchestratorPath);
     const pendingQuestions = beads.listPendingQuestions(orchestratorPath);
@@ -1631,12 +1631,15 @@ export class Dispatcher {
       // metrics DB may not be initialized
     }
 
-    let pendingCI: { project: string; prNumber: number; agent: string }[] = [];
+    let pendingCI: { project: string; prNumber: number; agent: string; stepId: string; sourceBeadId: string; title: string }[] = [];
     try {
       pendingCI = getStepsPendingCI().map((s) => ({
         project: s.project,
         prNumber: s.prNumber,
         agent: s.agent,
+        stepId: s.id,
+        sourceBeadId: s.sourceBeadId,
+        title: s.title,
       }));
     } catch {
       // ignore

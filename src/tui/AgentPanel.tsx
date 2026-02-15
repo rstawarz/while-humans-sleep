@@ -15,6 +15,9 @@ interface PendingCIInfo {
   project: string;
   prNumber: number;
   agent: string;
+  stepId: string;
+  sourceBeadId: string;
+  title: string;
 }
 
 interface AgentPanelProps {
@@ -89,7 +92,7 @@ export function AgentPanel({
       })}
       {pendingCI.length > 0 && pendingCI.map((ci, i) => (
         <Text key={"ci-" + i} color="cyan">
-          {"  \u23F3 Waiting for CI: PR #" + ci.prNumber + " (" + ci.project + ")"}
+          {"  \u23F3 PR #" + ci.prNumber + " \u2014 CI running (" + ci.stepId + ", " + ci.sourceBeadId + ") - " + ci.title}
         </Text>
       ))}
       {pendingQuestionCount > 0 && (

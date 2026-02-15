@@ -271,6 +271,8 @@ export interface PendingCIStep {
   retryCount: number;
   agent: string;
   project: string;
+  sourceBeadId: string;
+  title: string;
 }
 
 /**
@@ -297,6 +299,18 @@ export function getStepsPendingCI(): PendingCIStep[] {
         const sourceInfo = epicId ? getSourceBeadInfo(epicId) : null;
         const project = sourceInfo?.project || "";
         if (!project) return null;
+
+        // Extract title from the epic (strip the "project:beadId - " prefix)
+        let title = "";
+        try {
+          const epic = beads.show(epicId!, orchestratorPath);
+          title = epic.title.includes(" - ")
+            ? epic.title.split(" - ").slice(1).join(" - ")
+            : epic.title;
+        } catch {
+          // ignore
+        }
+
         return {
           id: bead.id,
           epicId,
@@ -304,6 +318,8 @@ export function getStepsPendingCI(): PendingCIStep[] {
           retryCount,
           agent: extractAgentFromBead(bead),
           project,
+          sourceBeadId: sourceInfo?.beadId || "",
+          title,
         };
       })
       .filter((step): step is PendingCIStep => step !== null);

@@ -318,7 +318,7 @@ describe("checkCIPendingPRs", () => {
 
   it("warns on merge conflicts", () => {
     vi.mocked(getStepsPendingCI).mockReturnValue([
-      { id: "step-1", epicId: "orc-1", prNumber: 46, retryCount: 0, agent: "quality_review", project: "argyn" },
+      { id: "step-1", epicId: "orc-1", prNumber: 46, retryCount: 0, agent: "quality_review", project: "argyn", sourceBeadId: "bd-123", title: "Test task" },
     ]);
     vi.mocked(execSync).mockReturnValue(
       JSON.stringify({ state: "OPEN", mergeable: "CONFLICTING", checks: [] })
@@ -332,7 +332,7 @@ describe("checkCIPendingPRs", () => {
 
   it("passes with passing checks", () => {
     vi.mocked(getStepsPendingCI).mockReturnValue([
-      { id: "step-1", epicId: "orc-1", prNumber: 46, retryCount: 0, agent: "quality_review", project: "argyn" },
+      { id: "step-1", epicId: "orc-1", prNumber: 46, retryCount: 0, agent: "quality_review", project: "argyn", sourceBeadId: "bd-123", title: "Test task" },
     ]);
     vi.mocked(execSync).mockReturnValue(
       JSON.stringify({ state: "OPEN", mergeable: "MERGEABLE", checks: ["SUCCESS"] })
