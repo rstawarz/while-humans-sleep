@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-02-15
+
+### Fixed
+- **Worktrees created from stale local branch**: `ensureWorktree` branched from the local base branch, which could be behind `origin` and missing merged dependency PRs. Now fetches origin before creating the worktree and uses `origin/<baseBranch>` as the base ref
+
 ## [0.13.1] - 2026-02-15
 
 ### Fixed
