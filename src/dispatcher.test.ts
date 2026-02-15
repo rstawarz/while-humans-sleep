@@ -492,7 +492,7 @@ describe("Dispatcher E2E", () => {
   });
 
   describe("Workflow: Session resume fallback", () => {
-    it("falls back to fresh agent run when session resume produces no output", async () => {
+    it("falls back to fresh agent run when CLI runner cannot resume", async () => {
       const { Dispatcher } = await import("./dispatcher.js");
 
       // No new work in projects
@@ -509,11 +509,22 @@ describe("Dispatcher E2E", () => {
         },
       ]);
 
-      // Step has resume info (question was answered)
+      // Step has resume info including original questions
       mockWorkflow.getStepResumeInfo.mockReturnValue({
         sessionId: "expired-session-123",
         answer: "Use JWT tokens",
         worktree: "/tmp/worktree/test-project/bd-123",
+        questions: [
+          {
+            question: "Which auth method should we use?",
+            header: "Auth",
+            options: [
+              { label: "JWT", description: "JSON Web Tokens" },
+              { label: "OAuth", description: "OAuth 2.0" },
+            ],
+            multiSelect: false,
+          },
+        ],
       });
 
       mockWorkflow.getWorkflowEpic.mockReturnValue({
@@ -527,14 +538,15 @@ describe("Dispatcher E2E", () => {
         beadId: "bd-123",
       });
 
-      // Resume produces NO output (session expired)
+      // CLI runner returns empty result (resume not supported)
       mockAgentRunnerInstance.resumeWithAnswer.mockResolvedValue({
         sessionId: "",
         output: "",
         costUsd: 0,
         turns: 0,
+        durationMs: 0,
         success: false,
-        error: "Session not found",
+        error: "CLI runner does not support session resume for question answers",
       });
 
       // Fresh agent run succeeds with a handoff
@@ -556,7 +568,7 @@ describe("Dispatcher E2E", () => {
       await (dispatcher as any).tick();
       await flushPromises();
 
-      // Resume should have been attempted first
+      // resumeWithAnswer should have been called (CLI runner returns immediately)
       expect(mockAgentRunnerInstance.resumeWithAnswer).toHaveBeenCalledWith(
         "expired-session-123",
         "Use JWT tokens",
@@ -566,10 +578,12 @@ describe("Dispatcher E2E", () => {
       // Fresh agent run should have been called as fallback
       expect(mockAgentRunnerInstance.run).toHaveBeenCalled();
 
-      // The prompt should include the answer context
-      const runCall = mockAgentRunnerInstance.run.mock.calls[0][0];
-      // formatAgentPrompt is mocked, but the work item description
-      // passed to runAgentStep should contain the answer
+      // The prompt should include both the original question and the answer
+      expect(mockAgentRunner.formatAgentPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskDescription: expect.stringContaining("Which auth method should we use?"),
+        })
+      );
       expect(mockAgentRunner.formatAgentPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           taskDescription: expect.stringContaining("Use JWT tokens"),

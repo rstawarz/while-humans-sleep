@@ -167,6 +167,7 @@ export function submitAnswer(
       sessionId: questionData.metadata.session_id,
       answer,
       worktree: questionData.metadata.worktree,
+      questions: questionData.questions,
     });
 
     // Close the question bead (this unblocks the step)

@@ -73,18 +73,26 @@ export class CLIAgentRunner implements AgentRunner {
 
   /**
    * Resume a session with an answer
+   *
+   * CLI --resume doesn't support injecting tool results for AskUserQuestion.
+   * The resumed session treats stdin as a new user message, not as the answer
+   * to the pending AskUserQuestion tool call. This always fails, so we return
+   * an empty result to signal the dispatcher should fall back to a fresh run.
    */
   async resumeWithAnswer(
-    sessionId: string,
-    answer: string,
-    options: Omit<AgentRunOptions, "prompt" | "resume">
+    _sessionId: string,
+    _answer: string,
+    _options: Omit<AgentRunOptions, "prompt" | "resume">
   ): Promise<AgentRunResult> {
-    // When resuming with an answer, the answer becomes the prompt
-    return this.executeAgent(answer, {
-      ...options,
-      prompt: answer,
-      resume: sessionId,
-    });
+    return {
+      sessionId: "",
+      output: "",
+      costUsd: 0,
+      turns: 0,
+      durationMs: 0,
+      success: false,
+      error: "CLI runner does not support session resume for question answers",
+    };
   }
 
   /**

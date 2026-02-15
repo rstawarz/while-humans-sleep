@@ -9,7 +9,7 @@
 import { execSync } from "child_process";
 import { beads } from "./beads/index.js";
 import { loadConfig, expandPath, getProject } from "./config.js";
-import type { WorkItem, Handoff } from "./types.js";
+import type { WorkItem, Handoff, Question } from "./types.js";
 import type { Bead } from "./beads/types.js";
 
 /**
@@ -562,6 +562,7 @@ export interface StepResumeInfo {
   sessionId: string;
   answer: string;
   worktree: string;
+  questions?: Question[];
 }
 
 // Marker for resume info in step labels

@@ -1073,7 +1073,7 @@ export class Dispatcher {
     if (resumeInfo) {
       // Clear the resume info now that we're using it
       clearStepResumeInfo(step.id);
-      await this.resumeAgentStep(activeWork, resumeInfo.sessionId, resumeInfo.answer);
+      await this.resumeAgentStep(activeWork, resumeInfo.sessionId, resumeInfo.answer, resumeInfo.questions);
     } else {
       await this.runAgentStep(activeWork);
     }
@@ -1178,7 +1178,8 @@ export class Dispatcher {
   private async resumeAgentStep(
     work: ActiveWork,
     sessionId: string,
-    answer: string
+    answer: string,
+    questions?: import("./types.js").Question[]
   ): Promise<void> {
     this.lastOperation = `resumeAgentStep:${work.agent}:${work.workItem.project}/${work.workItem.id}`;
     await this.notifier.notifyProgress(work, `Resuming ${work.agent} agent with answer`);
@@ -1212,14 +1213,18 @@ export class Dispatcher {
         return;
       }
 
-      // Check if resume produced no output — session may have expired.
-      // Fall back to a fresh agent run with the Q&A context injected,
-      // instead of going through the doomed handoff detection chain.
+      // Check if resume produced no output — session may have expired or
+      // the CLI runner doesn't support resume for question answers.
+      // Fall back to a fresh agent run with the Q&A context injected.
       if (!result.output.trim() && !result.pendingQuestion) {
-        this.logger.warn(
-          `⚠️ Session resume produced no output (session ${sessionId} may have expired)`
+        this.logger.log(
+          `ℹ️ CLI runner does not support session resume — starting fresh agent run with Q&A context`
         );
-        this.logger.log(`   Falling back to fresh agent run with answer context`);
+
+        // Build question text from original questions if available
+        const questionText = questions?.length
+          ? questions.map((q) => `Q: ${q.question}`).join("\n")
+          : "Unknown question";
 
         // Enrich the description with the Q&A so the fresh agent has context
         const enrichedWork: ActiveWork = {
@@ -1229,7 +1234,7 @@ export class Dispatcher {
             description:
               work.workItem.description +
               `\n\n## Previously Asked Question & Answer\n` +
-              `The previous agent session asked a question and received this answer:\n\n` +
+              `${questionText}\n\n` +
               `**Answer:** ${answer}\n\n` +
               `Please incorporate this answer into your work.`,
           },
