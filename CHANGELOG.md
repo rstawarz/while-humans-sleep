@@ -5,6 +5,11 @@ All notable changes to While Humans Sleep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.5] - 2026-02-15
+
+### Added
+- **Claude auth check in `whs doctor`**: Verifies Claude authentication before starting. For CLI runner, checks that `claude` is in PATH and responds to a prompt. For SDK runner, checks that `ANTHROPIC_API_KEY` is available. The dispatcher preflight now uses the same `checkClaudeAuth()` function so both report consistently
+
 ## [0.13.4] - 2026-02-15
 
 ### Fixed
