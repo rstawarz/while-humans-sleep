@@ -702,6 +702,9 @@ export class Dispatcher {
    */
   private async checkPendingCI(): Promise<void> {
     const pendingSteps = getStepsPendingCI();
+    if (pendingSteps.length > 0) {
+      this.logger.log(`🔄 Checking CI for ${pendingSteps.length} pending PR(s): ${pendingSteps.map((s) => `#${s.prNumber}`).join(", ")}`);
+    }
 
     for (const step of pendingSteps) {
       try {
@@ -733,7 +736,7 @@ export class Dispatcher {
         const ciStatus = this.getGitHubCIStatus(step.prNumber, repoPath);
 
         if (ciStatus === "pending") {
-          // Still running, skip
+          this.logger.log(`   ⏳ PR #${step.prNumber} — CI still running`);
           continue;
         }
 
