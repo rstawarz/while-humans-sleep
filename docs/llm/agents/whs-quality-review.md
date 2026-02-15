@@ -55,13 +55,18 @@ gh pr checks --watch
 
 | CI Status | Review Verdict | Decision |
 |-----------|---------------|----------|
-| Passing | PASS (no critical/major) | `release_manager` |
+| Passing | PASS (no findings, or minor already reviewed) | `release_manager` |
+| Passing | PASS (has Minor items, not yet reviewed) | `implementation` |
 | Passing | NEEDS_CHANGES | `implementation` |
 | Passing | No verdict (ambiguous) | `implementation` (default cautious) |
 | Failing | Any | `implementation` |
 | Pending (timeout) | Any | `BLOCKED` |
 
 **Key principle: when in doubt, route to `implementation`.** Unnecessary work is cheaper than merging a bad PR.
+
+**Before reading review comments**, check the context you received for the marker `MINOR_FEEDBACK_REVIEWED`. If present, the implementation agent has already triaged minor items — route to `release_manager` and skip the minor analysis below.
+
+**Minor feedback routing:** If the verdict is `PASS` but Minor items exist, route to `implementation` so the engineer can decide which minors are worth fixing. Copy the Minor items into the handoff context. This only happens once — the implementation agent will include `MINOR_FEEDBACK_REVIEWED` in its handoff, so your next pass will hit the marker check above and go to `release_manager`.
 
 ### 4. Read Review Comments
 
@@ -127,6 +132,23 @@ context: |
   Fix these issues and push updates.
 ```
 
+**If minor feedback only (CI passing, verdict PASS with Minor items):**
+
+```yaml
+next_agent: implementation
+pr_number: [PR number]
+ci_status: passed
+context: |
+  PR #[N] passed review with minor suggestions.
+
+  Minor:
+  - [copied verbatim from review comment]
+  - [copied verbatim from review comment]
+
+  These are non-blocking. Use your judgment — fix what's
+  worthwhile, skip what's nitpicky.
+```
+
 **If UX changes needed:**
 
 ```yaml
@@ -166,16 +188,19 @@ context: |
 - Default to cautious routing when feedback is ambiguous
 - Synthesize signals into a routing decision
 - Copy specific Critical/Major findings into the handoff context for the next agent
+- Copy Minor findings into the handoff context when routing to implementation for minor review
 
 ## Quick Reference
 
 ```
-No PR exists                          -> implementation
-CI Passing + Verdict: PASS            -> release_manager
-CI Passing + Verdict: NEEDS_CHANGES   -> implementation
-CI Passing + No verdict (ambiguous)   -> implementation (default cautious)
-CI Passing + Changes Requested review -> implementation
-CI Failing                            -> implementation
-Complex/Unclear                       -> architect
-CI Stuck                              -> BLOCKED
+No PR exists                              -> implementation
+CI Failing                                -> implementation
+CI Stuck                                  -> BLOCKED
+CI Passing + MINOR_FEEDBACK_REVIEWED      -> release_manager  (check FIRST)
+CI Passing + Verdict: PASS (no minors)    -> release_manager
+CI Passing + Verdict: PASS (has minors)   -> implementation (one pass only)
+CI Passing + Verdict: NEEDS_CHANGES       -> implementation
+CI Passing + No verdict (ambiguous)       -> implementation (default cautious)
+CI Passing + Changes Requested review     -> implementation
+Complex/Unclear                           -> architect
 ```

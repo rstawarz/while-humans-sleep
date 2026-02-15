@@ -202,6 +202,33 @@ context: |
   Ready for re-review.
 ```
 
+## If Reviewing Minor Feedback
+
+When routed back with Minor-only suggestions (verdict was PASS):
+
+1. Read each minor item in the handoff context
+2. For each item, decide:
+   - **Fix it** if it's trivial, clearly improves the code, or is a legitimate cleanup
+   - **Skip it** if it's subjective, nitpicky, or would add unnecessary complexity
+3. Make fixes, run tests, push changes
+4. Handoff with the `MINOR_FEEDBACK_REVIEWED` marker:
+
+```yaml
+next_agent: quality_review
+pr_number: [same PR]
+ci_status: pending
+context: |
+  MINOR_FEEDBACK_REVIEWED
+
+  Reviewed minor feedback on PR #[N]:
+  - Fixed: [what you fixed and why]
+  - Skipped: [what you skipped and why]
+
+  Ready for final review.
+```
+
+**Important:** You MUST include `MINOR_FEEDBACK_REVIEWED` on its own line in the context. This signals to quality_review that minor feedback has been triaged and prevents re-routing.
+
 ## Quality Checklist
 
 Before handoff to quality_review:
