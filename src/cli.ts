@@ -2130,6 +2130,117 @@ telegramCmd
     console.log("  Telegram notifications enabled.\n");
   });
 
+// Advance command (manually advance a stuck workflow)
+program
+  .command("advance <epic-id>")
+  .description("Manually advance a blocked workflow to the next agent")
+  .option("--next-agent <agent>", "Next agent to hand off to (inferred from last step if omitted)")
+  .requiredOption("--context <text>", "Summary context for the next agent")
+  .option("--pr-number <number>", "PR number if one was created")
+  .option("--ci-status <status>", "CI status: pending, passed, or failed")
+  .action(async (epicId, options) => {
+    if (!requireOrchestrator()) {
+      process.exit(1);
+    }
+
+    const { isValidAgent } = await import("./handoff.js");
+    const {
+      advanceWorkflow,
+      completeWorkflow,
+      findEpicBySourceBead,
+      getDefaultNextAgent,
+    } = await import("./workflow.js");
+
+    // Resolve epic ID — try as source bead ID first, then use directly
+    let resolvedEpicId = epicId;
+    const epic = findEpicBySourceBead(epicId);
+    if (epic) {
+      resolvedEpicId = epic.id;
+      console.log(`Resolved source bead ${epicId} → epic ${resolvedEpicId}`);
+    }
+
+    // Infer next agent if not provided
+    if (!options.nextAgent) {
+      const inferred = getDefaultNextAgent(resolvedEpicId);
+      if (!inferred) {
+        console.error("Error: Could not infer --next-agent from workflow history.");
+        console.error("Provide it explicitly: --next-agent <agent>");
+        console.error("Valid values: implementation, quality_review, release_manager, ux_specialist, architect, planner, DONE, BLOCKED");
+        process.exit(1);
+      }
+      options.nextAgent = inferred.nextAgent;
+      console.log(`Inferred next agent: ${inferred.nextAgent} (from last step: ${inferred.lastAgent})`);
+    }
+
+    // Validate agent name
+    if (!isValidAgent(options.nextAgent)) {
+      console.error(`Error: Invalid --next-agent "${options.nextAgent}"`);
+      console.error("Valid values: implementation, quality_review, release_manager, ux_specialist, architect, planner, DONE, BLOCKED");
+      process.exit(1);
+    }
+
+    // Validate ci_status if provided
+    if (options.ciStatus && !["pending", "passed", "failed"].includes(options.ciStatus)) {
+      console.error(`Error: Invalid --ci-status "${options.ciStatus}"`);
+      console.error("Valid values: pending, passed, failed");
+      process.exit(1);
+    }
+
+    // Parse optional handoff fields
+    const handoff: { pr_number?: number; ci_status?: "pending" | "passed" | "failed" } = {};
+    if (options.prNumber) {
+      const prNum = parseInt(options.prNumber, 10);
+      if (isNaN(prNum)) {
+        console.error(`Error: --pr-number must be a number, got "${options.prNumber}"`);
+        process.exit(1);
+      }
+      handoff.pr_number = prNum;
+    }
+    if (options.ciStatus) {
+      handoff.ci_status = options.ciStatus as "pending" | "passed" | "failed";
+    }
+
+    // Handle DONE as special case
+    if (options.nextAgent === "DONE") {
+      try {
+        completeWorkflow(resolvedEpicId, "done", options.context);
+        console.log(`✅ Workflow ${resolvedEpicId} marked as DONE.`);
+        console.log(`   Reason: ${options.context}`);
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Handle BLOCKED — just mark it blocked with context
+    if (options.nextAgent === "BLOCKED") {
+      try {
+        completeWorkflow(resolvedEpicId, "blocked", options.context);
+        console.log(`⏸ Workflow ${resolvedEpicId} marked as BLOCKED.`);
+        console.log(`   Reason: ${options.context}`);
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Normal advance — create next step
+    try {
+      const stepId = advanceWorkflow(resolvedEpicId, options.nextAgent, options.context, handoff);
+      console.log(`✅ Workflow ${resolvedEpicId} advanced to ${options.nextAgent}.`);
+      console.log(`   New step: ${stepId}`);
+      console.log(`   Context: ${options.context.slice(0, 100)}${options.context.length > 100 ? "..." : ""}`);
+      if (handoff.pr_number) console.log(`   PR: #${handoff.pr_number}`);
+      if (handoff.ci_status) console.log(`   CI: ${handoff.ci_status}`);
+      console.log(`\n   The dispatcher will pick this up on the next tick.`);
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
 // Handoff command (called by agents from worktrees)
 program
   .command("handoff")

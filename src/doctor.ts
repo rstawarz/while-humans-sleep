@@ -259,7 +259,7 @@ export function checkBlockedWorkflows(config: Config): DoctorCheck {
       };
     }
 
-    const details = active.map((b) => {
+    const details = active.flatMap((b) => {
       const sourceInfo = getSourceBeadInfo(b.id);
       const source = sourceInfo
         ? `${sourceInfo.project}/${sourceInfo.beadId}`
@@ -274,9 +274,15 @@ export function checkBlockedWorkflows(config: Config): DoctorCheck {
         ? blockedComment.text.replace("Blocked: ", "")
         : undefined;
 
-      return reason
-        ? `${b.id} (${source}) — ${reason}`
-        : `${b.id} (${source})`;
+      const lines: string[] = [];
+      lines.push(
+        reason
+          ? `${b.id} (${source}) — ${reason}`
+          : `${b.id} (${source})`
+      );
+      lines.push(`  → whs retry ${b.id}    (re-run same agent)`);
+      lines.push(`  → whs advance ${b.id} --context "..."    (skip to next agent)`);
+      return lines;
     });
 
     return {

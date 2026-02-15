@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getFirstAgent } from "./workflow.js";
+import { getFirstAgent, DEFAULT_NEXT_AGENT } from "./workflow.js";
 import type { WorkItem, Handoff } from "./types.js";
 import type { WorkflowEpic, WorkflowStep } from "./workflow.js";
 import type { Bead } from "./beads/types.js";
@@ -1084,6 +1084,282 @@ describe("workflow functions with mocked beads", () => {
           status: "open",
         })
       );
+    });
+  });
+
+  describe("DEFAULT_NEXT_AGENT", () => {
+    it("maps implementation → quality_review", () => {
+      expect(DEFAULT_NEXT_AGENT.get("implementation")).toBe("quality_review");
+    });
+
+    it("maps quality_review → release_manager", () => {
+      expect(DEFAULT_NEXT_AGENT.get("quality_review")).toBe("release_manager");
+    });
+
+    it("maps release_manager → DONE", () => {
+      expect(DEFAULT_NEXT_AGENT.get("release_manager")).toBe("DONE");
+    });
+
+    it("maps planner → implementation", () => {
+      expect(DEFAULT_NEXT_AGENT.get("planner")).toBe("implementation");
+    });
+
+    it("maps architect → implementation", () => {
+      expect(DEFAULT_NEXT_AGENT.get("architect")).toBe("implementation");
+    });
+
+    it("maps ux_specialist → quality_review", () => {
+      expect(DEFAULT_NEXT_AGENT.get("ux_specialist")).toBe("quality_review");
+    });
+
+    it("returns undefined for unknown agents", () => {
+      expect(DEFAULT_NEXT_AGENT.get("unknown_agent")).toBeUndefined();
+    });
+  });
+
+  describe("getDefaultNextAgent", () => {
+    it("returns the default next agent from last step", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "closed",
+            labels: ["agent:implementation", "whs:step"],
+            title: "implementation",
+          },
+        ],
+      }]));
+
+      const result = getDefaultNextAgent("bd-w001");
+
+      expect(result).toEqual({ nextAgent: "quality_review", lastAgent: "implementation" });
+    });
+
+    it("uses the last step when multiple steps exist", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "closed",
+            labels: ["agent:implementation", "whs:step"],
+            title: "implementation",
+          },
+          {
+            id: "bd-w001.2",
+            status: "closed",
+            labels: ["agent:quality_review", "whs:step"],
+            title: "quality_review",
+          },
+        ],
+      }]));
+
+      const result = getDefaultNextAgent("bd-w001");
+
+      expect(result).toEqual({ nextAgent: "release_manager", lastAgent: "quality_review" });
+    });
+
+    it("returns null when no steps exist", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [],
+      }]));
+
+      const result = getDefaultNextAgent("bd-w001");
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null when agent has no default transition", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "closed",
+            labels: ["agent:unknown_agent", "whs:step"],
+            title: "unknown_agent",
+          },
+        ],
+      }]));
+
+      const result = getDefaultNextAgent("bd-w001");
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null on bd show error", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockImplementation(() => {
+        throw new Error("Failed to show");
+      });
+
+      const result = getDefaultNextAgent("bd-nonexistent");
+
+      expect(result).toBeNull();
+    });
+
+    it("falls back to title when no agent label", async () => {
+      const { getDefaultNextAgent } = await import("./workflow.js");
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          {
+            id: "bd-w001.1",
+            status: "closed",
+            labels: ["whs:step"],
+            title: "planner",
+          },
+        ],
+      }]));
+
+      const result = getDefaultNextAgent("bd-w001");
+
+      expect(result).toEqual({ nextAgent: "implementation", lastAgent: "planner" });
+    });
+  });
+
+  describe("advanceWorkflow", () => {
+    it("advances a blocked workflow to the next agent", async () => {
+      const { advanceWorkflow } = await import("./workflow.js");
+
+      // Epic exists and is blocked
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        title: "test:bd-src - Task",
+        status: "blocked",
+        labels: ["blocked:human"],
+      });
+
+      // Mock bd show --json returning open steps
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [
+          { id: "bd-w001.1", status: "in_progress" },
+        ],
+      }]));
+
+      // Mock step creation
+      mockBeads.create.mockReturnValue({ id: "bd-w001.2" });
+
+      const stepId = advanceWorkflow("bd-w001", "quality_review", "PR ready for review", {
+        pr_number: 175,
+        ci_status: "pending",
+      });
+
+      expect(stepId).toBe("bd-w001.2");
+
+      // Epic should be reset to open with labels removed
+      expect(mockBeads.update).toHaveBeenCalledWith(
+        "bd-w001",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          status: "open",
+          labelRemove: ["blocked:human", "errored:auth"],
+        })
+      );
+
+      // Old in_progress step should be closed
+      expect(mockBeads.close).toHaveBeenCalledWith(
+        "bd-w001.1",
+        "Closed by manual advance",
+        "/mock/orchestrator"
+      );
+
+      // New step should be created with handoff data
+      expect(mockBeads.create).toHaveBeenCalledWith(
+        "quality_review",
+        "/mock/orchestrator",
+        expect.objectContaining({
+          type: "task",
+          parent: "bd-w001",
+          labels: expect.arrayContaining(["agent:quality_review", "whs:step", "pr:175", "ci:pending"]),
+        })
+      );
+
+      // Comment should note the manual advance
+      expect(mockBeads.comment).toHaveBeenCalledWith(
+        "bd-w001",
+        "Manual advance to quality_review",
+        "/mock/orchestrator"
+      );
+    });
+
+    it("throws when epic is closed", async () => {
+      const { advanceWorkflow } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        status: "closed",
+        labels: [],
+      });
+
+      expect(() => advanceWorkflow("bd-w001", "implementation", "context"))
+        .toThrow('has status "closed"');
+    });
+
+    it("throws when epic is not found", async () => {
+      const { advanceWorkflow } = await import("./workflow.js");
+
+      mockBeads.show.mockImplementation(() => {
+        throw new Error("Not found");
+      });
+
+      expect(() => advanceWorkflow("bd-nonexistent", "implementation", "context"))
+        .toThrow();
+    });
+
+    it("advances an in_progress workflow", async () => {
+      const { advanceWorkflow } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        status: "in_progress",
+        labels: [],
+      });
+
+      mockExecSync.mockReturnValue(JSON.stringify([{
+        id: "bd-w001",
+        dependents: [],
+      }]));
+
+      mockBeads.create.mockReturnValue({ id: "bd-w001.2" });
+
+      const stepId = advanceWorkflow("bd-w001", "quality_review", "context");
+
+      expect(stepId).toBe("bd-w001.2");
+    });
+
+    it("handles bd show error gracefully when closing steps", async () => {
+      const { advanceWorkflow } = await import("./workflow.js");
+
+      mockBeads.show.mockReturnValue({
+        id: "bd-w001",
+        status: "blocked",
+        labels: ["blocked:human"],
+      });
+
+      // bd show --json fails
+      mockExecSync.mockImplementation(() => {
+        throw new Error("Failed");
+      });
+
+      mockBeads.create.mockReturnValue({ id: "bd-w001.2" });
+
+      // Should still create the new step despite step-closing failure
+      const stepId = advanceWorkflow("bd-w001", "implementation", "context");
+      expect(stepId).toBe("bd-w001.2");
     });
   });
 });

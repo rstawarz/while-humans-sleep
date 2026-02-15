@@ -282,6 +282,13 @@ describe("checkBlockedWorkflows", () => {
     expect(result.message).toContain("1 blocked");
     expect(result.details?.[0]).toContain("bridget_ai/bai-zv0.1");
     expect(result.details?.[0]).toContain("Agent failed to produce a valid handoff");
+    // Should include remediation hints
+    expect(result.details).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("whs retry orc-fcc"),
+        expect.stringContaining('whs advance orc-fcc --context "..."'),
+      ])
+    );
   });
 
   it("filters out closed workflows", () => {

@@ -808,6 +808,68 @@ export function retryWorkflow(epicId: string): void {
 }
 
 /**
+ * Manually advances a blocked workflow to the next agent
+ *
+ * Used when a workflow gets stuck in BLOCKED state (e.g., agent completed work
+ * but failed to produce a handoff). Closes any open/in_progress steps, resets
+ * the epic to open, and creates a new step for the specified agent.
+ */
+export function advanceWorkflow(
+  epicId: string,
+  nextAgent: string,
+  context: string,
+  handoff?: Partial<Handoff>
+): string {
+  const orchestratorPath = getOrchestratorPath();
+
+  // Validate epic exists
+  const epic = beads.show(epicId, orchestratorPath);
+  if (!epic) {
+    throw new Error(`Epic ${epicId} not found`);
+  }
+
+  // Validate epic is blocked (or in_progress — allow advancing stuck workflows too)
+  if (epic.status !== "blocked" && epic.status !== "in_progress" && epic.status !== "open") {
+    throw new Error(`Epic ${epicId} has status "${epic.status}" — can only advance blocked, in_progress, or open epics`);
+  }
+
+  // Reset epic to open, remove blocked labels
+  beads.update(epicId, orchestratorPath, {
+    status: "open",
+    labelRemove: ["blocked:human", "errored:auth"],
+  });
+
+  // Close any open/in_progress steps under the epic
+  try {
+    const raw = execSync(`bd show ${epicId} --json`, {
+      cwd: orchestratorPath,
+      encoding: "utf-8",
+      timeout: 10000,
+    }).trim();
+    const data = JSON.parse(raw) as Array<{
+      dependents?: Array<{ id: string; status: string }>;
+    }>;
+    const steps = data[0]?.dependents ?? [];
+
+    for (const step of steps) {
+      if (step.status === "open" || step.status === "in_progress") {
+        beads.close(step.id, "Closed by manual advance", orchestratorPath);
+      }
+    }
+  } catch {
+    // Best effort — steps may not exist
+  }
+
+  // Create next step
+  const stepId = createNextStep(epicId, nextAgent, context, handoff);
+
+  // Add comment noting the manual advance
+  beads.comment(epicId, `Manual advance to ${nextAgent}`, orchestratorPath);
+
+  return stepId;
+}
+
+/**
  * Extracts the agent name from a bead's labels or title
  */
 function extractAgentFromBead(bead: Bead): string {
@@ -840,6 +902,66 @@ function parseEpicLabels(labels: string[]): {
   }
 
   return { project, sourceId };
+}
+
+/**
+ * Default agent transitions in the workflow state machine.
+ *
+ * Maps the last agent that ran to the natural next agent.
+ * Used by getDefaultNextAgent() to infer --next-agent when omitted.
+ */
+export const DEFAULT_NEXT_AGENT: ReadonlyMap<string, string> = new Map([
+  ["implementation", "quality_review"],
+  ["quality_review", "release_manager"],
+  ["release_manager", "DONE"],
+  ["planner", "implementation"],
+  ["architect", "implementation"],
+  ["ux_specialist", "quality_review"],
+]);
+
+/**
+ * Infers the default next agent for a workflow epic.
+ *
+ * Looks at the last step under the epic, extracts the agent from its labels,
+ * and returns the default next agent from the transition map.
+ *
+ * Returns null if no steps found or the agent has no default transition.
+ */
+export function getDefaultNextAgent(epicId: string): { nextAgent: string; lastAgent: string } | null {
+  const orchestratorPath = getOrchestratorPath();
+
+  try {
+    const raw = execSync(`bd show ${epicId} --json`, {
+      cwd: orchestratorPath,
+      encoding: "utf-8",
+      timeout: 10000,
+    }).trim();
+    const data = JSON.parse(raw) as Array<{
+      dependents?: Array<{
+        id: string;
+        status: string;
+        labels?: string[];
+        title?: string;
+      }>;
+    }>;
+    const steps = data[0]?.dependents ?? [];
+
+    if (steps.length === 0) return null;
+
+    // Find the last step's agent
+    const lastStep = steps[steps.length - 1];
+    const agentLabel = lastStep.labels?.find((l) => l.startsWith("agent:"));
+    const lastAgent = agentLabel?.replace("agent:", "") || lastStep.title || "";
+
+    if (!lastAgent) return null;
+
+    const nextAgent = DEFAULT_NEXT_AGENT.get(lastAgent);
+    if (!nextAgent) return null;
+
+    return { nextAgent, lastAgent };
+  } catch {
+    return null;
+  }
 }
 
 /**
